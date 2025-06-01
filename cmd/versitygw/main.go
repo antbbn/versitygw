@@ -99,6 +99,7 @@ func main() {
 		scoutfsCommand(),
 		s3Command(),
 		azureCommand(),
+		hdfsCommand(),
 		pluginCommand(),
 		adminCommand(),
 		testCommand(),
