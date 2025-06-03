@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/md5"
 
-	// "crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,7 +106,7 @@ const (
 	deleteMarkerKey     = "delete-marker"
 	versionIdKey        = "version-id"
 
-	// nullVersionId = "null"
+	nullVersionId = "null"
 
 	// doFalloc   = true
 	// skipFalloc = false
@@ -646,7 +645,7 @@ func (h *HDFS) isBucketVersioningEnabled(s types.BucketVersioningStatus) bool {
 // 	return filepath.Join(p.versioningDir, bucket, genObjVersionKey(key))
 // }
 
-// // Generates the versioning path for the given object key
+// Generates the versioning path for the given object key
 // func genObjVersionKey(key string) string {
 // 	sum := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
 
@@ -1825,70 +1824,70 @@ type objectMetadata struct {
 
 // fill out the user metadata map with the metadata for the object
 // and return object meta properties as `ObjectMetadata`
-// func (p *Posix) loadObjectMetaData(bucket, object string, fi *os.FileInfo, m map[string]string) objectMetadata {
-// 	ents, err := p.meta.ListAttributes(bucket, object)
-// 	if err != nil || len(ents) == 0 {
-// 		return objectMetadata{}
-// 	}
+func (h *HDFS) loadObjectMetaData(bucket, object string, fi *os.FileInfo, m map[string]string) objectMetadata {
+	ents, err := h.meta.ListAttributes(bucket, object)
+	if err != nil || len(ents) == 0 {
+		return objectMetadata{}
+	}
 
-// 	if m != nil {
-// 		for _, e := range ents {
-// 			if !isValidMeta(e) {
-// 				continue
-// 			}
-// 			b, err := p.meta.RetrieveAttribute(nil, bucket, object, e)
-// 			if err != nil {
-// 				continue
-// 			}
-// 			if b == nil {
-// 				m[strings.TrimPrefix(e, fmt.Sprintf("%v.", metaHdr))] = ""
-// 				continue
-// 			}
-// 			m[strings.TrimPrefix(e, fmt.Sprintf("%v.", metaHdr))] = string(b)
-// 		}
-// 	}
+	if m != nil {
+		for _, e := range ents {
+			if !isValidMeta(e) {
+				continue
+			}
+			b, err := h.meta.RetrieveAttribute(nil, bucket, object, e)
+			if err != nil {
+				continue
+			}
+			if b == nil {
+				m[strings.TrimPrefix(e, fmt.Sprintf("%v.", metaHdr))] = ""
+				continue
+			}
+			m[strings.TrimPrefix(e, fmt.Sprintf("%v.", metaHdr))] = string(b)
+		}
+	}
 
-// 	var result objectMetadata
+	var result objectMetadata
 
-// 	b, err := p.meta.RetrieveAttribute(nil, bucket, object, contentTypeHdr)
-// 	if err == nil {
-// 		result.ContentType = backend.GetPtrFromString(string(b))
-// 	}
+	b, err := h.meta.RetrieveAttribute(nil, bucket, object, contentTypeHdr)
+	if err == nil {
+		result.ContentType = backend.GetPtrFromString(string(b))
+	}
 
-// 	if (result.ContentType == nil || *result.ContentType == "") && fi != nil {
-// 		if (*fi).IsDir() {
-// 			// this is the media type for directories in AWS and Nextcloud
-// 			result.ContentType = backend.GetPtrFromString("application/x-directory")
-// 		}
-// 	}
+	if (result.ContentType == nil || *result.ContentType == "") && fi != nil {
+		if (*fi).IsDir() {
+			// this is the media type for directories in AWS and Nextcloud
+			result.ContentType = backend.GetPtrFromString("application/x-directory")
+		}
+	}
 
-// 	b, err = p.meta.RetrieveAttribute(nil, bucket, object, contentEncHdr)
-// 	if err == nil {
-// 		result.ContentEncoding = backend.GetPtrFromString(string(b))
-// 	}
+	b, err = h.meta.RetrieveAttribute(nil, bucket, object, contentEncHdr)
+	if err == nil {
+		result.ContentEncoding = backend.GetPtrFromString(string(b))
+	}
 
-// 	b, err = p.meta.RetrieveAttribute(nil, bucket, object, contentDispHdr)
-// 	if err == nil {
-// 		result.ContentDisposition = backend.GetPtrFromString(string(b))
-// 	}
+	b, err = h.meta.RetrieveAttribute(nil, bucket, object, contentDispHdr)
+	if err == nil {
+		result.ContentDisposition = backend.GetPtrFromString(string(b))
+	}
 
-// 	b, err = p.meta.RetrieveAttribute(nil, bucket, object, contentLangHdr)
-// 	if err == nil {
-// 		result.ContentLanguage = backend.GetPtrFromString(string(b))
-// 	}
+	b, err = h.meta.RetrieveAttribute(nil, bucket, object, contentLangHdr)
+	if err == nil {
+		result.ContentLanguage = backend.GetPtrFromString(string(b))
+	}
 
-// 	b, err = p.meta.RetrieveAttribute(nil, bucket, object, cacheCtrlHdr)
-// 	if err == nil {
-// 		result.CacheControl = backend.GetPtrFromString(string(b))
-// 	}
+	b, err = h.meta.RetrieveAttribute(nil, bucket, object, cacheCtrlHdr)
+	if err == nil {
+		result.CacheControl = backend.GetPtrFromString(string(b))
+	}
 
-// 	b, err = p.meta.RetrieveAttribute(nil, bucket, object, expiresHdr)
-// 	if err == nil {
-// 		result.Expires = backend.GetPtrFromString(string(b))
-// 	}
+	b, err = h.meta.RetrieveAttribute(nil, bucket, object, expiresHdr)
+	if err == nil {
+		result.Expires = backend.GetPtrFromString(string(b))
+	}
 
-// 	return result
-// }
+	return result
+}
 
 func (h *HDFS) storeObjectMetadata(f *os.File, bucket, object string, m objectMetadata) error {
 	if getString(m.ContentType) != "" {
@@ -1931,9 +1930,9 @@ func (h *HDFS) storeObjectMetadata(f *os.File, bucket, object string, m objectMe
 	return nil
 }
 
-// func isValidMeta(val string) bool {
-// 	return strings.HasPrefix(val, metaHdr)
-// }
+func isValidMeta(val string) bool {
+	return strings.HasPrefix(val, metaHdr)
+}
 
 // func (p *Posix) AbortMultipartUpload(_ context.Context, mpu *s3.AbortMultipartUploadInput) error {
 // 	if mpu.Bucket == nil {
@@ -3353,506 +3352,520 @@ func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3r
 // 	}, nil
 // }
 
-// func (p *Posix) GetObject(_ context.Context, input *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
-// 	if input.Bucket == nil {
-// 		return nil, s3err.GetAPIError(s3err.ErrInvalidBucketName)
-// 	}
-// 	if input.Key == nil {
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	var versionId string
-// 	if input.VersionId != nil {
-// 		versionId = *input.VersionId
-// 	}
+func (h *HDFS) GetObject(_ context.Context, input *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
+	if input.Bucket == nil {
+		return nil, s3err.GetAPIError(s3err.ErrInvalidBucketName)
+	}
+	if input.Key == nil {
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	var versionId string
+	if input.VersionId != nil {
+		versionId = *input.VersionId
+	}
 
-// 	if !p.versioningEnabled() && versionId != "" {
-// 		//TODO: Maybe we need to return our custom error here?
-// 		return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
-// 	}
+	if !h.versioningEnabled() && versionId != "" {
+		//TODO: Maybe we need to return our custom error here?
+		return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
+	}
 
-// 	bucket := *input.Bucket
-// 	_, err := os.Stat(bucket)
-// 	if errors.Is(err, fs.ErrNotExist) {
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchBucket)
-// 	}
-// 	if err != nil {
-// 		return nil, fmt.Errorf("stat bucket: %w", err)
-// 	}
+	bucket := *input.Bucket
+	_, err := h.client.Stat(filepath.Join(h.rootdir, bucket))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchBucket)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("stat bucket: %w", err)
+	}
 
-// 	object := *input.Key
-// 	if versionId != "" {
-// 		vId, err := p.meta.RetrieveAttribute(nil, bucket, object, versionIdKey)
-// 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-// 			return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 		}
-// 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 			return nil, fmt.Errorf("get obj versionId: %w", err)
-// 		}
-// 		if errors.Is(err, meta.ErrNoSuchKey) {
-// 			vId = []byte(nullVersionId)
-// 		}
+	object := *input.Key
+	// if versionId != "" {
+	// 	vId, err := h.meta.RetrieveAttribute(nil, bucket, object, versionIdKey)
+	// 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+	// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	// 	}
+	// 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+	// 		return nil, fmt.Errorf("get obj versionId: %w", err)
+	// 	}
+	// 	if errors.Is(err, meta.ErrNoSuchKey) {
+	// 		vId = []byte(nullVersionId)
+	// 	}
 
-// 		if string(vId) != versionId {
-// 			bucket = filepath.Join(p.versioningDir, bucket)
-// 			object = filepath.Join(genObjVersionKey(object), versionId)
-// 		}
-// 	}
+	// 	if string(vId) != versionId {
+	// 		bucket = filepath.Join(p.versioningDir, bucket)
+	// 		object = filepath.Join(genObjVersionKey(object), versionId)
+	// 	}
+	// }
 
-// 	objPath := filepath.Join(bucket, object)
+	objPath := filepath.Join(h.rootdir, bucket, object)
 
-// 	fi, err := os.Stat(objPath)
-// 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-// 		if versionId != "" {
-// 			return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
-// 		}
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	if errors.Is(err, syscall.ENAMETOOLONG) {
-// 		return nil, s3err.GetAPIError(s3err.ErrKeyTooLong)
-// 	}
-// 	if err != nil {
-// 		return nil, fmt.Errorf("stat object: %w", err)
-// 	}
+	fi, err := h.client.Stat(objPath)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		if versionId != "" {
+			return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
+		}
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	if errors.Is(err, syscall.ENAMETOOLONG) {
+		return nil, s3err.GetAPIError(s3err.ErrKeyTooLong)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("stat object: %w", err)
+	}
 
-// 	if strings.HasSuffix(object, "/") && !fi.IsDir() {
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	if !strings.HasSuffix(object, "/") && fi.IsDir() {
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
+	if strings.HasSuffix(object, "/") && !fi.IsDir() {
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	if !strings.HasSuffix(object, "/") && fi.IsDir() {
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
 
-// 	if p.versioningEnabled() {
-// 		isDelMarker, err := p.isObjDeleteMarker(bucket, object)
-// 		if err != nil {
-// 			return nil, err
-// 		}
+	// if h.versioningEnabled() {
+	// 	isDelMarker, err := h.isObjDeleteMarker(bucket, object)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
 
-// 		// if the specified object version is a delete marker, return MethodNotAllowed
-// 		if isDelMarker {
-// 			if versionId != "" {
-// 				err = s3err.GetAPIError(s3err.ErrMethodNotAllowed)
-// 			} else {
-// 				err = s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 			}
-// 			return &s3.GetObjectOutput{
-// 				DeleteMarker: getBoolPtr(true),
-// 				LastModified: backend.GetTimePtr(fi.ModTime()),
-// 			}, err
-// 		}
-// 	}
+	// 	// if the specified object version is a delete marker, return MethodNotAllowed
+	// 	if isDelMarker {
+	// 		if versionId != "" {
+	// 			err = s3err.GetAPIError(s3err.ErrMethodNotAllowed)
+	// 		} else {
+	// 			err = s3err.GetAPIError(s3err.ErrNoSuchKey)
+	// 		}
+	// 		return &s3.GetObjectOutput{
+	// 			DeleteMarker: getBoolPtr(true),
+	// 			LastModified: backend.GetTimePtr(fi.ModTime()),
+	// 		}, err
+	// 	}
+	// }
 
-// 	objSize := fi.Size()
-// 	startOffset, length, isValid, err := backend.ParseObjectRange(objSize, *input.Range)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+	objSize := fi.Size()
+	startOffset, length, isValid, err := backend.ParseObjectRange(objSize, *input.Range)
+	if err != nil {
+		return nil, err
+	}
 
-// 	if fi.IsDir() {
-// 		// directory objects are always 0 len
-// 		objSize = 0
-// 		length = 0
-// 	}
+	if fi.IsDir() {
+		// directory objects are always 0 len
+		objSize = 0
+		length = 0
+	}
 
-// 	var contentRange string
-// 	if isValid {
-// 		contentRange = fmt.Sprintf("bytes %v-%v/%v",
-// 			startOffset, startOffset+length-1, objSize)
-// 	}
+	var contentRange string
+	if isValid {
+		contentRange = fmt.Sprintf("bytes %v-%v/%v",
+			startOffset, startOffset+length-1, objSize)
+	}
 
-// 	if fi.IsDir() {
-// 		userMetaData := make(map[string]string)
+	if fi.IsDir() {
+		userMetaData := make(map[string]string)
 
-// 		objMeta := p.loadObjectMetaData(bucket, object, &fi, userMetaData)
-// 		b, err := p.meta.RetrieveAttribute(nil, bucket, object, etagkey)
-// 		etag := string(b)
-// 		if err != nil {
-// 			etag = ""
-// 		}
+		objMeta := h.loadObjectMetaData(bucket, object, &fi, userMetaData)
+		b, err := h.meta.RetrieveAttribute(nil, bucket, object, etagkey)
+		etag := string(b)
+		if err != nil {
+			etag = ""
+		}
 
-// 		var tagCount *int32
-// 		tags, err := p.getAttrTags(bucket, object)
-// 		if err != nil && !errors.Is(err, s3err.GetAPIError(s3err.ErrBucketTaggingNotFound)) {
-// 			return nil, err
-// 		}
-// 		if tags != nil {
-// 			tgCount := int32(len(tags))
-// 			tagCount = &tgCount
-// 		}
+		var tagCount *int32
+		tags, err := h.getAttrTags(bucket, object)
+		if err != nil && !errors.Is(err, s3err.GetAPIError(s3err.ErrBucketTaggingNotFound)) {
+			return nil, err
+		}
+		if tags != nil {
+			tgCount := int32(len(tags))
+			tagCount = &tgCount
+		}
 
-// 		return &s3.GetObjectOutput{
-// 			AcceptRanges:       backend.GetPtrFromString("bytes"),
-// 			ContentLength:      &length,
-// 			ContentEncoding:    objMeta.ContentEncoding,
-// 			ContentType:        objMeta.ContentType,
-// 			ContentLanguage:    objMeta.ContentLanguage,
-// 			ContentDisposition: objMeta.ContentDisposition,
-// 			CacheControl:       objMeta.CacheControl,
-// 			ExpiresString:      objMeta.Expires,
-// 			ETag:               &etag,
-// 			LastModified:       backend.GetTimePtr(fi.ModTime()),
-// 			Metadata:           userMetaData,
-// 			TagCount:           tagCount,
-// 			ContentRange:       &contentRange,
-// 			StorageClass:       types.StorageClassStandard,
-// 			VersionId:          &versionId,
-// 		}, nil
-// 	}
+		return &s3.GetObjectOutput{
+			AcceptRanges:       backend.GetPtrFromString("bytes"),
+			ContentLength:      &length,
+			ContentEncoding:    objMeta.ContentEncoding,
+			ContentType:        objMeta.ContentType,
+			ContentLanguage:    objMeta.ContentLanguage,
+			ContentDisposition: objMeta.ContentDisposition,
+			CacheControl:       objMeta.CacheControl,
+			ExpiresString:      objMeta.Expires,
+			ETag:               &etag,
+			LastModified:       backend.GetTimePtr(fi.ModTime()),
+			Metadata:           userMetaData,
+			TagCount:           tagCount,
+			ContentRange:       &contentRange,
+			StorageClass:       types.StorageClassStandard,
+			VersionId:          &versionId,
+		}, nil
+	}
 
-// 	// If versioning is configured get the object versionId
-// 	if p.versioningEnabled() && versionId == "" {
-// 		vId, err := p.meta.RetrieveAttribute(nil, bucket, object, versionIdKey)
-// 		if errors.Is(err, meta.ErrNoSuchKey) {
-// 			versionId = nullVersionId
-// 		} else if err != nil {
-// 			return nil, err
-// 		}
+	// If versioning is configured get the object versionId
+	if h.versioningEnabled() && versionId == "" {
+		vId, err := h.meta.RetrieveAttribute(nil, bucket, object, versionIdKey)
+		if errors.Is(err, meta.ErrNoSuchKey) {
+			versionId = nullVersionId
+		} else if err != nil {
+			return nil, err
+		}
 
-// 		versionId = string(vId)
-// 	}
+		versionId = string(vId)
+	}
 
-// 	userMetaData := make(map[string]string)
+	userMetaData := make(map[string]string)
 
-// 	objMeta := p.loadObjectMetaData(bucket, object, &fi, userMetaData)
+	objMeta := h.loadObjectMetaData(bucket, object, &fi, userMetaData)
 
-// 	b, err := p.meta.RetrieveAttribute(nil, bucket, object, etagkey)
-// 	etag := string(b)
-// 	if err != nil {
-// 		etag = ""
-// 	}
+	b, err := h.meta.RetrieveAttribute(nil, bucket, object, etagkey)
+	etag := string(b)
+	if err != nil {
+		etag = ""
+	}
 
-// 	var tagCount *int32
-// 	tags, err := p.getAttrTags(bucket, object)
-// 	if err != nil && !errors.Is(err, s3err.GetAPIError(s3err.ErrBucketTaggingNotFound)) {
-// 		return nil, err
-// 	}
-// 	if tags != nil {
-// 		tgCount := int32(len(tags))
-// 		tagCount = &tgCount
-// 	}
+	var tagCount *int32
+	tags, err := h.getAttrTags(bucket, object)
+	if err != nil && !errors.Is(err, s3err.GetAPIError(s3err.ErrBucketTaggingNotFound)) {
+		return nil, err
+	}
+	if tags != nil {
+		tgCount := int32(len(tags))
+		tagCount = &tgCount
+	}
 
-// 	f, err := os.Open(objPath)
-// 	if errors.Is(err, fs.ErrNotExist) {
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	if err != nil {
-// 		return nil, fmt.Errorf("open object: %w", err)
-// 	}
+	f, err := h.client.Open(objPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("open object: %w", err)
+	}
 
-// 	var checksums s3response.Checksum
-// 	var cType types.ChecksumType
-// 	// Skip the checksums retreival if object isn't requested fully
-// 	if input.ChecksumMode == types.ChecksumModeEnabled && length-startOffset == objSize {
-// 		checksums, err = p.retrieveChecksums(f, bucket, object)
-// 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 			return nil, fmt.Errorf("get object checksums: %w", err)
-// 		}
-// 		if checksums.Type != "" {
-// 			cType = checksums.Type
-// 		}
-// 	}
+	var checksums s3response.Checksum
+	var cType types.ChecksumType
+	// Skip the checksums retreival if object isn't requested fully
+	if input.ChecksumMode == types.ChecksumModeEnabled && length-startOffset == objSize {
+		checksums, err = h.retrieveChecksums(f, bucket, object)
+		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+			return nil, fmt.Errorf("get object checksums: %w", err)
+		}
+		if checksums.Type != "" {
+			cType = checksums.Type
+		}
+	}
 
-// 	// using an os.File allows zero-copy sendfile via io.Copy(os.File, net.Conn)
-// 	var body io.ReadCloser = f
-// 	if startOffset != 0 || length != objSize {
-// 		rdr := io.NewSectionReader(f, startOffset, length)
-// 		body = &backend.FileSectionReadCloser{R: rdr, F: f}
-// 	}
+	// using an os.File allows zero-copy sendfile via io.Copy(os.File, net.Conn)
+	var body io.ReadCloser = f
+	if startOffset != 0 || length != objSize {
+		rdr := io.NewSectionReader(f, startOffset, length)
+		body = &fileSectionReadCloser{R: rdr, F: f}
+	}
 
-// 	return &s3.GetObjectOutput{
-// 		AcceptRanges:       backend.GetPtrFromString("bytes"),
-// 		ContentLength:      &length,
-// 		ContentEncoding:    objMeta.ContentEncoding,
-// 		ContentType:        objMeta.ContentType,
-// 		ContentDisposition: objMeta.ContentDisposition,
-// 		ContentLanguage:    objMeta.ContentLanguage,
-// 		CacheControl:       objMeta.CacheControl,
-// 		ExpiresString:      objMeta.Expires,
-// 		ETag:               &etag,
-// 		LastModified:       backend.GetTimePtr(fi.ModTime()),
-// 		Metadata:           userMetaData,
-// 		TagCount:           tagCount,
-// 		ContentRange:       &contentRange,
-// 		StorageClass:       types.StorageClassStandard,
-// 		VersionId:          &versionId,
-// 		Body:               body,
-// 		ChecksumCRC32:      checksums.CRC32,
-// 		ChecksumCRC32C:     checksums.CRC32C,
-// 		ChecksumSHA1:       checksums.SHA1,
-// 		ChecksumSHA256:     checksums.SHA256,
-// 		ChecksumCRC64NVME:  checksums.CRC64NVME,
-// 		ChecksumType:       cType,
-// 	}, nil
-// }
+	return &s3.GetObjectOutput{
+		AcceptRanges:       backend.GetPtrFromString("bytes"),
+		ContentLength:      &length,
+		ContentEncoding:    objMeta.ContentEncoding,
+		ContentType:        objMeta.ContentType,
+		ContentDisposition: objMeta.ContentDisposition,
+		ContentLanguage:    objMeta.ContentLanguage,
+		CacheControl:       objMeta.CacheControl,
+		ExpiresString:      objMeta.Expires,
+		ETag:               &etag,
+		LastModified:       backend.GetTimePtr(fi.ModTime()),
+		Metadata:           userMetaData,
+		TagCount:           tagCount,
+		ContentRange:       &contentRange,
+		StorageClass:       types.StorageClassStandard,
+		VersionId:          &versionId,
+		Body:               body,
+		ChecksumCRC32:      checksums.CRC32,
+		ChecksumCRC32C:     checksums.CRC32C,
+		ChecksumSHA1:       checksums.SHA1,
+		ChecksumSHA256:     checksums.SHA256,
+		ChecksumCRC64NVME:  checksums.CRC64NVME,
+		ChecksumType:       cType,
+	}, nil
+}
 
-// func (p *Posix) HeadObject(ctx context.Context, input *s3.HeadObjectInput) (*s3.HeadObjectOutput, error) {
-// 	if input.Bucket == nil {
-// 		return nil, s3err.GetAPIError(s3err.ErrInvalidBucketName)
-// 	}
-// 	if input.Key == nil {
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	versionId := backend.GetStringFromPtr(input.VersionId)
+type fileSectionReadCloser struct {
+	R io.Reader
+	F *hdfs.FileReader
+}
 
-// 	if !p.versioningEnabled() && versionId != "" {
-// 		//TODO: Maybe we need to return our custom error here?
-// 		return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
-// 	}
+func (f *fileSectionReadCloser) Read(p []byte) (int, error) {
+	return f.R.Read(p)
+}
 
-// 	bucket := *input.Bucket
-// 	object := *input.Key
+func (f *fileSectionReadCloser) Close() error {
+	return f.F.Close()
+}
 
-// 	if input.PartNumber != nil {
-// 		uploadId, sum, err := p.retrieveUploadId(bucket, object)
-// 		if err != nil {
-// 			return nil, err
-// 		}
+func (h *HDFS) HeadObject(ctx context.Context, input *s3.HeadObjectInput) (*s3.HeadObjectOutput, error) {
+	if input.Bucket == nil {
+		return nil, s3err.GetAPIError(s3err.ErrInvalidBucketName)
+	}
+	if input.Key == nil {
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	versionId := backend.GetStringFromPtr(input.VersionId)
 
-// 		ents, err := os.ReadDir(filepath.Join(bucket, metaTmpMultipartDir, fmt.Sprintf("%x", sum), uploadId))
-// 		if errors.Is(err, fs.ErrNotExist) {
-// 			return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 		}
-// 		if err != nil {
-// 			return nil, fmt.Errorf("read parts: %w", err)
-// 		}
+	if !h.versioningEnabled() && versionId != "" {
+		//TODO: Maybe we need to return our custom error here?
+		return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
+	}
 
-// 		partPath := filepath.Join(metaTmpMultipartDir, fmt.Sprintf("%x", sum), uploadId, fmt.Sprintf("%v", *input.PartNumber))
+	bucket := *input.Bucket
+	object := *input.Key
 
-// 		part, err := os.Stat(filepath.Join(bucket, partPath))
-// 		if errors.Is(err, fs.ErrNotExist) {
-// 			return nil, s3err.GetAPIError(s3err.ErrInvalidPart)
-// 		}
-// 		if errors.Is(err, syscall.ENAMETOOLONG) {
-// 			return nil, s3err.GetAPIError(s3err.ErrKeyTooLong)
-// 		}
-// 		if err != nil {
-// 			return nil, fmt.Errorf("stat part: %w", err)
-// 		}
+	// TODO when multipart is implemented
+	// if input.PartNumber != nil {
+	// 	uploadId, sum, err := p.retrieveUploadId(bucket, object)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
 
-// 		size := part.Size()
+	// 	ents, err := os.ReadDir(filepath.Join(bucket, metaTmpMultipartDir, fmt.Sprintf("%x", sum), uploadId))
+	// 	if errors.Is(err, fs.ErrNotExist) {
+	// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	// 	}
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("read parts: %w", err)
+	// 	}
 
-// 		startOffset, length, isValid, err := backend.ParseObjectRange(size, getString(input.Range))
-// 		if err != nil {
-// 			return nil, err
-// 		}
+	// 	partPath := filepath.Join(metaTmpMultipartDir, fmt.Sprintf("%x", sum), uploadId, fmt.Sprintf("%v", *input.PartNumber))
 
-// 		var contentRange string
-// 		if isValid {
-// 			contentRange = fmt.Sprintf("bytes %v-%v/%v",
-// 				startOffset, startOffset+length-1, size)
-// 		}
+	// 	part, err := os.Stat(filepath.Join(bucket, partPath))
+	// 	if errors.Is(err, fs.ErrNotExist) {
+	// 		return nil, s3err.GetAPIError(s3err.ErrInvalidPart)
+	// 	}
+	// 	if errors.Is(err, syscall.ENAMETOOLONG) {
+	// 		return nil, s3err.GetAPIError(s3err.ErrKeyTooLong)
+	// 	}
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("stat part: %w", err)
+	// 	}
 
-// 		b, err := p.meta.RetrieveAttribute(nil, bucket, partPath, etagkey)
-// 		etag := string(b)
-// 		if err != nil {
-// 			etag = ""
-// 		}
-// 		partsCount := int32(len(ents))
+	// 	size := part.Size()
 
-// 		return &s3.HeadObjectOutput{
-// 			AcceptRanges:  backend.GetPtrFromString("bytes"),
-// 			LastModified:  backend.GetTimePtr(part.ModTime()),
-// 			ETag:          &etag,
-// 			PartsCount:    &partsCount,
-// 			ContentLength: &length,
-// 			StorageClass:  types.StorageClassStandard,
-// 			ContentRange:  &contentRange,
-// 		}, nil
-// 	}
+	// 	startOffset, length, isValid, err := backend.ParseObjectRange(size, getString(input.Range))
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
 
-// 	_, err := os.Stat(bucket)
-// 	if errors.Is(err, fs.ErrNotExist) {
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchBucket)
-// 	}
-// 	if err != nil {
-// 		return nil, fmt.Errorf("stat bucket: %w", err)
-// 	}
+	// 	var contentRange string
+	// 	if isValid {
+	// 		contentRange = fmt.Sprintf("bytes %v-%v/%v",
+	// 			startOffset, startOffset+length-1, size)
+	// 	}
 
-// 	if versionId != "" {
-// 		vId, err := p.meta.RetrieveAttribute(nil, bucket, object, versionIdKey)
-// 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-// 			return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 		}
-// 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 			return nil, fmt.Errorf("get obj versionId: %w", err)
-// 		}
-// 		if errors.Is(err, meta.ErrNoSuchKey) {
-// 			bucket = filepath.Join(p.versioningDir, bucket)
-// 			object = filepath.Join(genObjVersionKey(object), versionId)
-// 		}
+	// 	b, err := p.meta.RetrieveAttribute(nil, bucket, partPath, etagkey)
+	// 	etag := string(b)
+	// 	if err != nil {
+	// 		etag = ""
+	// 	}
+	// 	partsCount := int32(len(ents))
 
-// 		if string(vId) != versionId {
-// 			bucket = filepath.Join(p.versioningDir, bucket)
-// 			object = filepath.Join(genObjVersionKey(object), versionId)
-// 		}
-// 	}
+	// 	return &s3.HeadObjectOutput{
+	// 		AcceptRanges:  backend.GetPtrFromString("bytes"),
+	// 		LastModified:  backend.GetTimePtr(part.ModTime()),
+	// 		ETag:          &etag,
+	// 		PartsCount:    &partsCount,
+	// 		ContentLength: &length,
+	// 		StorageClass:  types.StorageClassStandard,
+	// 		ContentRange:  &contentRange,
+	// 	}, nil
+	// }
 
-// 	objPath := filepath.Join(bucket, object)
+	_, err := h.client.Stat(filepath.Join(h.rootdir, bucket))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchBucket)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("stat bucket: %w", err)
+	}
 
-// 	fi, err := os.Stat(objPath)
-// 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-// 		if versionId != "" {
-// 			return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
-// 		}
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	if errors.Is(err, syscall.ENAMETOOLONG) {
-// 		return nil, s3err.GetAPIError(s3err.ErrKeyTooLong)
-// 	}
-// 	if err != nil {
-// 		return nil, fmt.Errorf("stat object: %w", err)
-// 	}
-// 	if strings.HasSuffix(object, "/") && !fi.IsDir() {
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	if !strings.HasSuffix(object, "/") && fi.IsDir() {
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
+	// if versionId != "" {
+	// 	vId, err := p.meta.RetrieveAttribute(nil, bucket, object, versionIdKey)
+	// 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+	// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	// 	}
+	// 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+	// 		return nil, fmt.Errorf("get obj versionId: %w", err)
+	// 	}
+	// 	if errors.Is(err, meta.ErrNoSuchKey) {
+	// 		bucket = filepath.Join(p.versioningDir, bucket)
+	// 		object = filepath.Join(genObjVersionKey(object), versionId)
+	// 	}
 
-// 	if p.versioningEnabled() {
-// 		isDelMarker, err := p.isObjDeleteMarker(bucket, object)
-// 		if err != nil {
-// 			return nil, err
-// 		}
+	// 	if string(vId) != versionId {
+	// 		bucket = filepath.Join(p.versioningDir, bucket)
+	// 		object = filepath.Join(genObjVersionKey(object), versionId)
+	// 	}
+	// }
 
-// 		// if the specified object version is a delete marker, return MethodNotAllowed
-// 		if isDelMarker {
-// 			if versionId != "" {
-// 				return &s3.HeadObjectOutput{
-// 					DeleteMarker: getBoolPtr(true),
-// 					LastModified: backend.GetTimePtr(fi.ModTime()),
-// 				}, s3err.GetAPIError(s3err.ErrMethodNotAllowed)
-// 			} else {
-// 				return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 			}
-// 		}
-// 	}
+	objPath := filepath.Join(h.rootdir, bucket, object)
 
-// 	if p.versioningEnabled() && versionId == "" {
-// 		vId, err := p.meta.RetrieveAttribute(nil, bucket, object, versionIdKey)
-// 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 			return nil, fmt.Errorf("get object versionId: %v", err)
-// 		}
+	fi, err := h.client.Stat(objPath)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		if versionId != "" {
+			return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
+		}
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	if errors.Is(err, syscall.ENAMETOOLONG) {
+		return nil, s3err.GetAPIError(s3err.ErrKeyTooLong)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("stat object: %w", err)
+	}
+	if strings.HasSuffix(object, "/") && !fi.IsDir() {
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	if !strings.HasSuffix(object, "/") && fi.IsDir() {
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
 
-// 		versionId = string(vId)
-// 	}
+	// if p.versioningEnabled() {
+	// 	isDelMarker, err := p.isObjDeleteMarker(bucket, object)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
 
-// 	userMetaData := make(map[string]string)
-// 	objMeta := p.loadObjectMetaData(bucket, object, &fi, userMetaData)
+	// 	// if the specified object version is a delete marker, return MethodNotAllowed
+	// 	if isDelMarker {
+	// 		if versionId != "" {
+	// 			return &s3.HeadObjectOutput{
+	// 				DeleteMarker: getBoolPtr(true),
+	// 				LastModified: backend.GetTimePtr(fi.ModTime()),
+	// 			}, s3err.GetAPIError(s3err.ErrMethodNotAllowed)
+	// 		} else {
+	// 			return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	// 		}
+	// 	}
+	// }
 
-// 	b, err := p.meta.RetrieveAttribute(nil, bucket, object, etagkey)
-// 	etag := string(b)
-// 	if err != nil {
-// 		etag = ""
-// 	}
+	// if p.versioningEnabled() && versionId == "" {
+	// 	vId, err := p.meta.RetrieveAttribute(nil, bucket, object, versionIdKey)
+	// 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+	// 		return nil, fmt.Errorf("get object versionId: %v", err)
+	// 	}
 
-// 	size := fi.Size()
+	// 	versionId = string(vId)
+	// }
 
-// 	startOffset, length, isValid, err := backend.ParseObjectRange(size, getString(input.Range))
-// 	if err != nil {
-// 		return nil, err
-// 	}
+	userMetaData := make(map[string]string)
+	objMeta := h.loadObjectMetaData(bucket, object, &fi, userMetaData)
 
-// 	var contentRange string
-// 	if isValid {
-// 		contentRange = fmt.Sprintf("bytes %v-%v/%v",
-// 			startOffset, startOffset+length-1, size)
-// 	}
+	b, err := h.meta.RetrieveAttribute(nil, bucket, object, etagkey)
+	etag := string(b)
+	if err != nil {
+		etag = ""
+	}
 
-// 	var objectLockLegalHoldStatus types.ObjectLockLegalHoldStatus
-// 	status, err := p.GetObjectLegalHold(ctx, bucket, object, versionId)
-// 	if err == nil {
-// 		if *status {
-// 			objectLockLegalHoldStatus = types.ObjectLockLegalHoldStatusOn
-// 		} else {
-// 			objectLockLegalHoldStatus = types.ObjectLockLegalHoldStatusOff
-// 		}
-// 	}
+	size := fi.Size()
 
-// 	var objectLockMode types.ObjectLockMode
-// 	var objectLockRetainUntilDate *time.Time
-// 	retention, err := p.GetObjectRetention(ctx, bucket, object, versionId)
-// 	if err == nil {
-// 		var config types.ObjectLockRetention
-// 		if err := json.Unmarshal(retention, &config); err == nil {
-// 			objectLockMode = types.ObjectLockMode(config.Mode)
-// 			objectLockRetainUntilDate = config.RetainUntilDate
-// 		}
-// 	}
+	startOffset, length, isValid, err := backend.ParseObjectRange(size, getString(input.Range))
+	if err != nil {
+		return nil, err
+	}
 
-// 	var checksums s3response.Checksum
-// 	var cType types.ChecksumType
-// 	if input.ChecksumMode == types.ChecksumModeEnabled {
-// 		checksums, err = p.retrieveChecksums(nil, bucket, object)
-// 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 			return nil, fmt.Errorf("get object checksums: %w", err)
-// 		}
-// 		if checksums.Type != "" {
-// 			cType = checksums.Type
-// 		}
-// 	}
+	var contentRange string
+	if isValid {
+		contentRange = fmt.Sprintf("bytes %v-%v/%v",
+			startOffset, startOffset+length-1, size)
+	}
 
-// 	return &s3.HeadObjectOutput{
-// 		ContentLength:             &length,
-// 		AcceptRanges:              backend.GetPtrFromString("bytes"),
-// 		ContentRange:              &contentRange,
-// 		ContentType:               objMeta.ContentType,
-// 		ContentEncoding:           objMeta.ContentEncoding,
-// 		ContentDisposition:        objMeta.ContentDisposition,
-// 		ContentLanguage:           objMeta.ContentLanguage,
-// 		CacheControl:              objMeta.CacheControl,
-// 		ExpiresString:             objMeta.Expires,
-// 		ETag:                      &etag,
-// 		LastModified:              backend.GetTimePtr(fi.ModTime()),
-// 		Metadata:                  userMetaData,
-// 		ObjectLockLegalHoldStatus: objectLockLegalHoldStatus,
-// 		ObjectLockMode:            objectLockMode,
-// 		ObjectLockRetainUntilDate: objectLockRetainUntilDate,
-// 		StorageClass:              types.StorageClassStandard,
-// 		VersionId:                 &versionId,
-// 		ChecksumCRC32:             checksums.CRC32,
-// 		ChecksumCRC32C:            checksums.CRC32C,
-// 		ChecksumSHA1:              checksums.SHA1,
-// 		ChecksumSHA256:            checksums.SHA256,
-// 		ChecksumCRC64NVME:         checksums.CRC64NVME,
-// 		ChecksumType:              cType,
-// 	}, nil
-// }
+	var objectLockLegalHoldStatus types.ObjectLockLegalHoldStatus
+	status, err := h.GetObjectLegalHold(ctx, bucket, object, versionId)
+	if err == nil {
+		if *status {
+			objectLockLegalHoldStatus = types.ObjectLockLegalHoldStatusOn
+		} else {
+			objectLockLegalHoldStatus = types.ObjectLockLegalHoldStatusOff
+		}
+	}
 
-// func (p *Posix) GetObjectAttributes(ctx context.Context, input *s3.GetObjectAttributesInput) (s3response.GetObjectAttributesResponse, error) {
-// 	data, err := p.HeadObject(ctx, &s3.HeadObjectInput{
-// 		Bucket:       input.Bucket,
-// 		Key:          input.Key,
-// 		VersionId:    input.VersionId,
-// 		ChecksumMode: types.ChecksumModeEnabled,
-// 	})
-// 	if err != nil {
-// 		if errors.Is(err, s3err.GetAPIError(s3err.ErrMethodNotAllowed)) && data != nil {
-// 			return s3response.GetObjectAttributesResponse{
-// 				DeleteMarker: data.DeleteMarker,
-// 				VersionId:    data.VersionId,
-// 			}, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 		}
+	var objectLockMode types.ObjectLockMode
+	var objectLockRetainUntilDate *time.Time
+	retention, err := h.GetObjectRetention(ctx, bucket, object, versionId)
+	if err == nil {
+		var config types.ObjectLockRetention
+		if err := json.Unmarshal(retention, &config); err == nil {
+			objectLockMode = types.ObjectLockMode(config.Mode)
+			objectLockRetainUntilDate = config.RetainUntilDate
+		}
+	}
 
-// 		return s3response.GetObjectAttributesResponse{}, err
-// 	}
+	var checksums s3response.Checksum
+	var cType types.ChecksumType
+	if input.ChecksumMode == types.ChecksumModeEnabled {
+		checksums, err = h.retrieveChecksums(nil, bucket, object)
+		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+			return nil, fmt.Errorf("get object checksums: %w", err)
+		}
+		if checksums.Type != "" {
+			cType = checksums.Type
+		}
+	}
 
-// 	return s3response.GetObjectAttributesResponse{
-// 		ETag:         backend.TrimEtag(data.ETag),
-// 		ObjectSize:   data.ContentLength,
-// 		StorageClass: data.StorageClass,
-// 		LastModified: data.LastModified,
-// 		VersionId:    data.VersionId,
-// 		DeleteMarker: data.DeleteMarker,
-// 		Checksum: &types.Checksum{
-// 			ChecksumCRC32:     data.ChecksumCRC32,
-// 			ChecksumCRC32C:    data.ChecksumCRC32C,
-// 			ChecksumSHA1:      data.ChecksumSHA1,
-// 			ChecksumSHA256:    data.ChecksumSHA256,
-// 			ChecksumCRC64NVME: data.ChecksumCRC64NVME,
-// 			ChecksumType:      data.ChecksumType,
-// 		},
-// 	}, nil
-// }
+	return &s3.HeadObjectOutput{
+		ContentLength:             &length,
+		AcceptRanges:              backend.GetPtrFromString("bytes"),
+		ContentRange:              &contentRange,
+		ContentType:               objMeta.ContentType,
+		ContentEncoding:           objMeta.ContentEncoding,
+		ContentDisposition:        objMeta.ContentDisposition,
+		ContentLanguage:           objMeta.ContentLanguage,
+		CacheControl:              objMeta.CacheControl,
+		ExpiresString:             objMeta.Expires,
+		ETag:                      &etag,
+		LastModified:              backend.GetTimePtr(fi.ModTime()),
+		Metadata:                  userMetaData,
+		ObjectLockLegalHoldStatus: objectLockLegalHoldStatus,
+		ObjectLockMode:            objectLockMode,
+		ObjectLockRetainUntilDate: objectLockRetainUntilDate,
+		StorageClass:              types.StorageClassStandard,
+		VersionId:                 &versionId,
+		ChecksumCRC32:             checksums.CRC32,
+		ChecksumCRC32C:            checksums.CRC32C,
+		ChecksumSHA1:              checksums.SHA1,
+		ChecksumSHA256:            checksums.SHA256,
+		ChecksumCRC64NVME:         checksums.CRC64NVME,
+		ChecksumType:              cType,
+	}, nil
+}
+
+func (h *HDFS) GetObjectAttributes(ctx context.Context, input *s3.GetObjectAttributesInput) (s3response.GetObjectAttributesResponse, error) {
+	data, err := h.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket:       input.Bucket,
+		Key:          input.Key,
+		VersionId:    input.VersionId,
+		ChecksumMode: types.ChecksumModeEnabled,
+	})
+	if err != nil {
+		if errors.Is(err, s3err.GetAPIError(s3err.ErrMethodNotAllowed)) && data != nil {
+			return s3response.GetObjectAttributesResponse{
+				DeleteMarker: data.DeleteMarker,
+				VersionId:    data.VersionId,
+			}, s3err.GetAPIError(s3err.ErrNoSuchKey)
+		}
+
+		return s3response.GetObjectAttributesResponse{}, err
+	}
+
+	return s3response.GetObjectAttributesResponse{
+		ETag:         backend.TrimEtag(data.ETag),
+		ObjectSize:   data.ContentLength,
+		StorageClass: data.StorageClass,
+		LastModified: data.LastModified,
+		VersionId:    data.VersionId,
+		DeleteMarker: data.DeleteMarker,
+		Checksum: &types.Checksum{
+			ChecksumCRC32:     data.ChecksumCRC32,
+			ChecksumCRC32C:    data.ChecksumCRC32C,
+			ChecksumSHA1:      data.ChecksumSHA1,
+			ChecksumSHA256:    data.ChecksumSHA256,
+			ChecksumCRC64NVME: data.ChecksumCRC64NVME,
+			ChecksumType:      data.ChecksumType,
+		},
+	}, nil
+}
 
 // func (p *Posix) CopyObject(ctx context.Context, input s3response.CopyObjectInput) (s3response.CopyObjectOutput, error) {
 // 	if input.Bucket == nil {
@@ -4169,7 +4182,7 @@ func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3r
 // 	}, nil
 // }
 
-// func (p *Posix) ListObjects(ctx context.Context, input *s3.ListObjectsInput) (s3response.ListObjectsResult, error) {
+// func (h *HDFS) ListObjects(ctx context.Context, input *s3.ListObjectsInput) (s3response.ListObjectsResult, error) {
 // 	if input.Bucket == nil {
 // 		return s3response.ListObjectsResult{}, s3err.GetAPIError(s3err.ErrInvalidBucketName)
 // 	}
@@ -4486,26 +4499,26 @@ func (h *HDFS) GetBucketAcl(_ context.Context, input *s3.GetBucketAclInput) ([]b
 // 	return p.getAttrTags(bucket, object)
 // }
 
-// func (p *Posix) getAttrTags(bucket, object string) (map[string]string, error) {
-// 	tags := make(map[string]string)
-// 	b, err := p.meta.RetrieveAttribute(nil, bucket, object, tagHdr)
-// 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	if errors.Is(err, meta.ErrNoSuchKey) {
-// 		return nil, s3err.GetAPIError(s3err.ErrBucketTaggingNotFound)
-// 	}
-// 	if err != nil {
-// 		return nil, fmt.Errorf("get tags: %w", err)
-// 	}
+func (h *HDFS) getAttrTags(bucket, object string) (map[string]string, error) {
+	tags := make(map[string]string)
+	b, err := h.meta.RetrieveAttribute(nil, bucket, object, tagHdr)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	if errors.Is(err, meta.ErrNoSuchKey) {
+		return nil, s3err.GetAPIError(s3err.ErrBucketTaggingNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get tags: %w", err)
+	}
 
-// 	err = json.Unmarshal(b, &tags)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("unmarshal tags: %w", err)
-// 	}
+	err = json.Unmarshal(b, &tags)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal tags: %w", err)
+	}
 
-// 	return tags, nil
-// }
+	return tags, nil
+}
 
 func (h *HDFS) PutObjectTagging(_ context.Context, bucket, object string, tags map[string]string) error {
 	_, err := h.client.Stat(filepath.Join(h.rootdir, bucket))
@@ -4737,53 +4750,53 @@ func (h *HDFS) PutObjectLegalHold(_ context.Context, bucket, object, versionId s
 	return nil
 }
 
-// func (p *Posix) GetObjectLegalHold(_ context.Context, bucket, object, versionId string) (*bool, error) {
-// 	err := p.doesBucketAndObjectExist(bucket, object)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	err = p.isBucketObjectLockEnabled(bucket)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+func (h *HDFS) GetObjectLegalHold(_ context.Context, bucket, object, versionId string) (*bool, error) {
+	err := h.doesBucketAndObjectExist(bucket, object)
+	if err != nil {
+		return nil, err
+	}
+	err = h.isBucketObjectLockEnabled(bucket)
+	if err != nil {
+		return nil, err
+	}
 
-// 	if versionId != "" {
-// 		if !p.versioningEnabled() {
-// 			//TODO: Maybe we need to return our custom error here?
-// 			return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
-// 		}
-// 		vId, err := p.meta.RetrieveAttribute(nil, bucket, object, versionIdKey)
-// 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-// 			return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 		}
-// 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 			return nil, fmt.Errorf("get obj versionId: %w", err)
-// 		}
+	// if versionId != "" {
+	// 	if !p.versioningEnabled() {
+	// 		//TODO: Maybe we need to return our custom error here?
+	// 		return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
+	// 	}
+	// 	vId, err := p.meta.RetrieveAttribute(nil, bucket, object, versionIdKey)
+	// 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+	// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	// 	}
+	// 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+	// 		return nil, fmt.Errorf("get obj versionId: %w", err)
+	// 	}
 
-// 		if string(vId) != versionId {
-// 			bucket = filepath.Join(p.versioningDir, bucket)
-// 			object = filepath.Join(genObjVersionKey(object), versionId)
-// 		}
-// 	}
+	// 	if string(vId) != versionId {
+	// 		bucket = filepath.Join(p.versioningDir, bucket)
+	// 		object = filepath.Join(genObjVersionKey(object), versionId)
+	// 	}
+	// }
 
-// 	data, err := p.meta.RetrieveAttribute(nil, bucket, object, objectLegalHoldKey)
-// 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-// 		if versionId != "" {
-// 			return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
-// 		}
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	if errors.Is(err, meta.ErrNoSuchKey) {
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchObjectLockConfiguration)
-// 	}
-// 	if err != nil {
-// 		return nil, fmt.Errorf("get object lock config: %w", err)
-// 	}
+	data, err := h.meta.RetrieveAttribute(nil, bucket, object, objectLegalHoldKey)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		if versionId != "" {
+			return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
+		}
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	if errors.Is(err, meta.ErrNoSuchKey) {
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchObjectLockConfiguration)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get object lock config: %w", err)
+	}
 
-// 	result := data[0] == 1
+	result := data[0] == 1
 
-// 	return &result, nil
-// }
+	return &result, nil
+}
 
 func (h *HDFS) PutObjectRetention(_ context.Context, bucket, object, versionId string, bypass bool, retention []byte) error {
 	err := h.doesBucketAndObjectExist(bucket, object)
@@ -4859,51 +4872,51 @@ func (h *HDFS) PutObjectRetention(_ context.Context, bucket, object, versionId s
 	return nil
 }
 
-// func (p *Posix) GetObjectRetention(_ context.Context, bucket, object, versionId string) ([]byte, error) {
-// 	err := p.doesBucketAndObjectExist(bucket, object)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	err = p.isBucketObjectLockEnabled(bucket)
-// 	if err != nil {
-// 		return nil, err
-// 	}
+func (h *HDFS) GetObjectRetention(_ context.Context, bucket, object, versionId string) ([]byte, error) {
+	err := h.doesBucketAndObjectExist(bucket, object)
+	if err != nil {
+		return nil, err
+	}
+	err = h.isBucketObjectLockEnabled(bucket)
+	if err != nil {
+		return nil, err
+	}
 
-// 	if versionId != "" {
-// 		if !p.versioningEnabled() {
-// 			//TODO: Maybe we need to return our custom error here?
-// 			return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
-// 		}
-// 		vId, err := p.meta.RetrieveAttribute(nil, bucket, object, versionIdKey)
-// 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-// 			return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 		}
-// 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 			return nil, fmt.Errorf("get obj versionId: %w", err)
-// 		}
+	// if versionId != "" {
+	// 	if !p.versioningEnabled() {
+	// 		//TODO: Maybe we need to return our custom error here?
+	// 		return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
+	// 	}
+	// 	vId, err := p.meta.RetrieveAttribute(nil, bucket, object, versionIdKey)
+	// 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+	// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	// 	}
+	// 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+	// 		return nil, fmt.Errorf("get obj versionId: %w", err)
+	// 	}
 
-// 		if string(vId) != versionId {
-// 			bucket = filepath.Join(p.versioningDir, bucket)
-// 			object = filepath.Join(genObjVersionKey(object), versionId)
-// 		}
-// 	}
+	// 	if string(vId) != versionId {
+	// 		bucket = filepath.Join(p.versioningDir, bucket)
+	// 		object = filepath.Join(genObjVersionKey(object), versionId)
+	// 	}
+	// }
 
-// 	data, err := p.meta.RetrieveAttribute(nil, bucket, object, objectRetentionKey)
-// 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-// 		if versionId != "" {
-// 			return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
-// 		}
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	if errors.Is(err, meta.ErrNoSuchKey) {
-// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchObjectLockConfiguration)
-// 	}
-// 	if err != nil {
-// 		return nil, fmt.Errorf("get object lock config: %w", err)
-// 	}
+	data, err := h.meta.RetrieveAttribute(nil, bucket, object, objectRetentionKey)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		if versionId != "" {
+			return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
+		}
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	if errors.Is(err, meta.ErrNoSuchKey) {
+		return nil, s3err.GetAPIError(s3err.ErrNoSuchObjectLockConfiguration)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get object lock config: %w", err)
+	}
 
-// 	return data, nil
-// }
+	return data, nil
+}
 
 // func (p *Posix) ChangeBucketOwner(ctx context.Context, bucket string, acl []byte) error {
 // 	return p.PutBucketAcl(ctx, bucket, acl)
@@ -4967,15 +4980,16 @@ func (h *HDFS) storeChecksums(f *os.File, bucket, object string, chs s3response.
 	return h.meta.StoreAttribute(f, bucket, object, checksumsKey, checksums)
 }
 
-// func (h *HDFS) retrieveChecksums(f *os.File, bucket, object string) (checksums s3response.Checksum, err error) {
-// 	checksumsAtr, err := h.meta.RetrieveAttribute(f, bucket, object, checksumsKey)
-// 	if err != nil {
-// 		return checksums, err
-// 	}
+func (h *HDFS) retrieveChecksums(_ *hdfs.FileReader, bucket, object string) (checksums s3response.Checksum, err error) {
+	// TODO nil now because we are using sidecar
+	checksumsAtr, err := h.meta.RetrieveAttribute(nil, bucket, object, checksumsKey)
+	if err != nil {
+		return checksums, err
+	}
 
-// 	err = json.Unmarshal(checksumsAtr, &checksums)
-// 	return checksums, err
-// }
+	err = json.Unmarshal(checksumsAtr, &checksums)
+	return checksums, err
+}
 
 func getString(str *string) string {
 	if str == nil {
@@ -4998,10 +5012,10 @@ type tmpfile struct {
 	size        int64
 }
 
-var (
-	// TODO: make this configurable
-	defaultFilePerm fs.FileMode = 0644
-)
+// var (
+// 	// TODO: make this configurable
+// 	defaultFilePerm fs.FileMode = 0644
+// )
 
 func (h *HDFS) openTmpFile(bucket string, size int64) (*tmpfile, error) {
 	tmpDir := filepath.Join(h.rootdir, bucket, metaTmpDir)
