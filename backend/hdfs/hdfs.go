@@ -3287,10 +3287,10 @@ func (h *HDFS) removeParents(bucket, object string) {
 
 	// Remove the last path separator for the directory objects
 	// to correctly detect the parent in the loop
-	objPath := strings.TrimSuffix(object, "/")
+	objPath := strings.TrimSuffix(filepath.Join(h.rootdir, bucket, object), "/")
 	for {
 		parent := filepath.Dir(objPath)
-		if parent == h.rootdir {
+		if parent == filepath.Join(h.rootdir, bucket) {
 			// stop removing parents if we hit the bucket directory.
 			break
 		}
