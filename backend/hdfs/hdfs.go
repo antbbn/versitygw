@@ -459,7 +459,7 @@ func (h *HDFS) DeleteBucket(_ context.Context, bucket string) error {
 	}
 
 	// Remove the bucket
-	err = h.client.Remove(filepath.Join(h.rootdir, bucket))
+	err = h.client.RemoveAll(filepath.Join(h.rootdir, bucket))
 	if err != nil {
 		return fmt.Errorf("remove bucket: %w", err)
 	}
@@ -4238,6 +4238,7 @@ func (h *HDFS) ListObjects(ctx context.Context, input *s3.ListObjectsInput) (s3r
 
 func (h *HDFS) fileToObj(bucket string, fetchOwner bool) GetObjFunc {
 	return func(path string, info fs.FileInfo) (s3response.Object, error) {
+		object := strings.TrimPrefix(path, filepath.Join(h.rootdir, bucket)+"/")
 		var owner *types.Owner
 		// Retreive the object owner data from bucket ACL, if fetchOwner is true
 		// All the objects in the bucket are owned by the bucket owner
@@ -4259,7 +4260,7 @@ func (h *HDFS) fileToObj(bucket string, fetchOwner bool) GetObjFunc {
 		if info.IsDir() {
 			// directory object only happens if directory empty
 			// check to see if this is a directory object by checking etag
-			etagBytes, err := h.meta.RetrieveAttribute(nil, bucket, path, etagkey)
+			etagBytes, err := h.meta.RetrieveAttribute(nil, bucket, object, etagkey)
 			if errors.Is(err, meta.ErrNoSuchKey) || errors.Is(err, fs.ErrNotExist) {
 				return s3response.Object{}, backend.ErrSkipObj
 			}
@@ -4271,10 +4272,9 @@ func (h *HDFS) fileToObj(bucket string, fetchOwner bool) GetObjFunc {
 			size := int64(0)
 			mtime := info.ModTime()
 
-			key := strings.TrimPrefix(path, filepath.Join(h.rootdir, bucket)+"/")
 			return s3response.Object{
 				ETag:         &etag,
-				Key:          &key,
+				Key:          &object,
 				LastModified: &mtime,
 				Size:         &size,
 				StorageClass: types.ObjectStorageClassStandard,
@@ -4283,25 +4283,26 @@ func (h *HDFS) fileToObj(bucket string, fetchOwner bool) GetObjFunc {
 		}
 
 		// If the object is a delete marker, skip
-		isDel, _ := h.isObjDeleteMarker(bucket, path)
+		isDel, _ := h.isObjDeleteMarker(bucket, object)
 		if isDel {
 			return s3response.Object{}, backend.ErrSkipObj
 		}
 
 		// Retreive the object checksum algorithm
-		checksums, err := h.retrieveChecksums(nil, bucket, path)
+		checksums, err := h.retrieveChecksums(nil, bucket, object)
 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 			return s3response.Object{}, backend.ErrSkipObj
 		}
 
 		// file object, get object info and fill out object data
-		etagBytes, err := h.meta.RetrieveAttribute(nil, bucket, path, etagkey)
+		etagBytes, err := h.meta.RetrieveAttribute(nil, bucket, object, etagkey)
 		if errors.Is(err, fs.ErrNotExist) {
 			return s3response.Object{}, backend.ErrSkipObj
 		}
 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 			return s3response.Object{}, fmt.Errorf("get etag: %w", err)
 		}
+		fmt.Println("MMMM", err, bucket, path, object)
 		// note: meta.ErrNoSuchKey will return etagBytes = []byte{}
 		// so this will just set etag to "" if its not already set
 
@@ -4310,10 +4311,9 @@ func (h *HDFS) fileToObj(bucket string, fetchOwner bool) GetObjFunc {
 		size := info.Size()
 		mtime := info.ModTime()
 
-		key := strings.TrimPrefix(path, filepath.Join(h.rootdir, bucket)+"/")
 		return s3response.Object{
 			ETag:              &etag,
-			Key:               &key,
+			Key:               &object,
 			LastModified:      &mtime,
 			Size:              &size,
 			StorageClass:      types.ObjectStorageClassStandard,
@@ -4907,9 +4907,9 @@ func (h *HDFS) GetObjectRetention(_ context.Context, bucket, object, versionId s
 	return data, nil
 }
 
-// func (p *Posix) ChangeBucketOwner(ctx context.Context, bucket string, acl []byte) error {
-// 	return p.PutBucketAcl(ctx, bucket, acl)
-// }
+func (h *HDFS) ChangeBucketOwner(ctx context.Context, bucket string, acl []byte) error {
+	return h.PutBucketAcl(ctx, bucket, acl)
+}
 
 func (h *HDFS) listBucketFileInfos() ([]fs.FileInfo, error) {
 	entries, err := h.client.ReadDir(h.rootdir)
