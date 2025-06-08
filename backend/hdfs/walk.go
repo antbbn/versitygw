@@ -155,14 +155,12 @@ func (h *HDFS) Walk(ctx context.Context, bucket string, prefix, delimiter, marke
 					return skipflag
 				}
 
-				// TODO: can we do better here rather than a second readdir
-				// per directory?
-				ents, err := h.client.ReadDir(path)
+				cs, err := h.client.GetContentSummary(path)
 				if err != nil {
 					return fmt.Errorf("readdir %q: %w", path, err)
 				}
 
-				if len(ents) != 0 {
+				if cs.DirectoryCount() > 1 || cs.FileCount() != 0 {
 					return skipflag
 				}
 			}
