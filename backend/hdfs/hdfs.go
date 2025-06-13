@@ -1808,17 +1808,17 @@ func (h *HDFS) checkUploadIDExists(bucket, object, uploadID string) ([32]byte, e
 	return sum, nil
 }
 
-// func (p *Posix) retrieveUploadId(bucket, object string) (string, [32]byte, error) {
-// 	sum := sha256.Sum256([]byte(object))
-// 	objdir := filepath.Join(bucket, metaTmpMultipartDir, fmt.Sprintf("%x", sum))
+func (h *HDFS) retrieveUploadId(bucket, object string) (string, [32]byte, error) {
+	sum := sha256.Sum256([]byte(object))
+	objdir := filepath.Join(h.rootdir, bucket, metaTmpMultipartDir, fmt.Sprintf("%x", sum))
 
-// 	entries, err := os.ReadDir(objdir)
-// 	if err != nil || len(entries) == 0 {
-// 		return "", [32]byte{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
+	entries, err := h.client.ReadDir(objdir)
+	if err != nil || len(entries) == 0 {
+		return "", [32]byte{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
 
-// 	return entries[0].Name(), sum, nil
-// }
+	return entries[0].Name(), sum, nil
+}
 
 type objectMetadata struct {
 	ContentType        *string
@@ -3619,63 +3619,63 @@ func (h *HDFS) HeadObject(ctx context.Context, input *s3.HeadObjectInput) (*s3.H
 	object := *input.Key
 
 	// TODO when multipart is implemented
-	// if input.PartNumber != nil {
-	// 	uploadId, sum, err := p.retrieveUploadId(bucket, object)
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
+	if input.PartNumber != nil {
+		uploadId, sum, err := h.retrieveUploadId(bucket, object)
+		if err != nil {
+			return nil, err
+		}
 
-	// 	ents, err := os.ReadDir(filepath.Join(bucket, metaTmpMultipartDir, fmt.Sprintf("%x", sum), uploadId))
-	// 	if errors.Is(err, fs.ErrNotExist) {
-	// 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
-	// 	}
-	// 	if err != nil {
-	// 		return nil, fmt.Errorf("read parts: %w", err)
-	// 	}
+		ents, err := h.client.ReadDir(filepath.Join(h.rootdir, bucket, metaTmpMultipartDir, fmt.Sprintf("%x", sum), uploadId))
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read parts: %w", err)
+		}
 
-	// 	partPath := filepath.Join(metaTmpMultipartDir, fmt.Sprintf("%x", sum), uploadId, fmt.Sprintf("%v", *input.PartNumber))
+		partPath := filepath.Join(metaTmpMultipartDir, fmt.Sprintf("%x", sum), uploadId, fmt.Sprintf("%v", *input.PartNumber))
 
-	// 	part, err := os.Stat(filepath.Join(bucket, partPath))
-	// 	if errors.Is(err, fs.ErrNotExist) {
-	// 		return nil, s3err.GetAPIError(s3err.ErrInvalidPart)
-	// 	}
-	// 	if errors.Is(err, syscall.ENAMETOOLONG) {
-	// 		return nil, s3err.GetAPIError(s3err.ErrKeyTooLong)
-	// 	}
-	// 	if err != nil {
-	// 		return nil, fmt.Errorf("stat part: %w", err)
-	// 	}
+		part, err := h.client.Stat(filepath.Join(h.rootdir, bucket, partPath))
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, s3err.GetAPIError(s3err.ErrInvalidPart)
+		}
+		if errors.Is(err, syscall.ENAMETOOLONG) {
+			return nil, s3err.GetAPIError(s3err.ErrKeyTooLong)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("stat part: %w", err)
+		}
 
-	// 	size := part.Size()
+		size := part.Size()
 
-	// 	startOffset, length, isValid, err := backend.ParseObjectRange(size, getString(input.Range))
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
+		startOffset, length, isValid, err := backend.ParseObjectRange(size, getString(input.Range))
+		if err != nil {
+			return nil, err
+		}
 
-	// 	var contentRange string
-	// 	if isValid {
-	// 		contentRange = fmt.Sprintf("bytes %v-%v/%v",
-	// 			startOffset, startOffset+length-1, size)
-	// 	}
+		var contentRange string
+		if isValid {
+			contentRange = fmt.Sprintf("bytes %v-%v/%v",
+				startOffset, startOffset+length-1, size)
+		}
 
-	// 	b, err := p.meta.RetrieveAttribute(nil, bucket, partPath, etagkey)
-	// 	etag := string(b)
-	// 	if err != nil {
-	// 		etag = ""
-	// 	}
-	// 	partsCount := int32(len(ents))
+		b, err := h.meta.RetrieveAttribute(nil, bucket, partPath, etagkey)
+		etag := string(b)
+		if err != nil {
+			etag = ""
+		}
+		partsCount := int32(len(ents))
 
-	// 	return &s3.HeadObjectOutput{
-	// 		AcceptRanges:  backend.GetPtrFromString("bytes"),
-	// 		LastModified:  backend.GetTimePtr(part.ModTime()),
-	// 		ETag:          &etag,
-	// 		PartsCount:    &partsCount,
-	// 		ContentLength: &length,
-	// 		StorageClass:  types.StorageClassStandard,
-	// 		ContentRange:  &contentRange,
-	// 	}, nil
-	// }
+		return &s3.HeadObjectOutput{
+			AcceptRanges:  backend.GetPtrFromString("bytes"),
+			LastModified:  backend.GetTimePtr(part.ModTime()),
+			ETag:          &etag,
+			PartsCount:    &partsCount,
+			ContentLength: &length,
+			StorageClass:  types.StorageClassStandard,
+			ContentRange:  &contentRange,
+		}, nil
+	}
 
 	_, err := h.client.Stat(filepath.Join(h.rootdir, bucket))
 	if errors.Is(err, fs.ErrNotExist) {
