@@ -89,13 +89,17 @@ func (h *HDFS) Walk(ctx context.Context, bucket string, prefix, delimiter, marke
 	var newMarker string
 	var truncated bool
 
-	prefix = filepath.Join(h.rootdir, bucket, prefix)
+	fmt.Println("HDFSWALK", bucket, prefix, delimiter, marker)
 	root := filepath.Join(h.rootdir, bucket)
+	markerTrimPrefix := root + "/"
 	if strings.HasSuffix(prefix, "/") {
+		prefix = filepath.Join(h.rootdir, bucket, prefix) + "/"
 		root = prefix
+	} else {
+		prefix = filepath.Join(h.rootdir, bucket, prefix)
 	}
 
-	err := h.client.Walk(root, func(path string, info fs.FileInfo, err error) error {
+	err := h.client.Walk(filepath.Clean(root), func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -103,13 +107,14 @@ func (h *HDFS) Walk(ctx context.Context, bucket string, prefix, delimiter, marke
 			return ctx.Err()
 		}
 		// Ignore the root directory
-		if path == root {
+		if path == filepath.Join(h.rootdir, bucket) {
 			return nil
 		}
 		if contains(info.Name(), skipdirs) {
 			return fs.SkipDir
 		}
 
+		fmt.Println("HDFSWALKFUNC", path, prefix)
 		// After this point, return skipflag instead of nil
 		// so we can skip a directory without an early return
 		var skipflag error
@@ -148,7 +153,7 @@ func (h *HDFS) Walk(ctx context.Context, bucket string, prefix, delimiter, marke
 					}
 					objects = append(objects, dirobj)
 					if (len(objects) + cpmap.Len()) == int(max) {
-						newMarker = path
+						newMarker = strings.TrimPrefix(path, markerTrimPrefix)
 						pastMax = true
 					}
 
@@ -168,11 +173,11 @@ func (h *HDFS) Walk(ctx context.Context, bucket string, prefix, delimiter, marke
 		}
 
 		if !pastMarker {
-			if path == marker {
+			if strings.TrimPrefix(path, markerTrimPrefix) == marker {
 				pastMarker = true
 				return skipflag
 			}
-			if path < marker {
+			if strings.TrimPrefix(path, markerTrimPrefix) < marker {
 				return skipflag
 			}
 		}
@@ -200,7 +205,7 @@ func (h *HDFS) Walk(ctx context.Context, bucket string, prefix, delimiter, marke
 			objects = append(objects, obj)
 
 			if (len(objects) + cpmap.Len()) == int(max) {
-				newMarker = path
+				newMarker = strings.TrimPrefix(path, markerTrimPrefix)
 				pastMax = true
 			}
 
@@ -229,7 +234,12 @@ func (h *HDFS) Walk(ctx context.Context, bucket string, prefix, delimiter, marke
 		// Note: The delimiter can be anything, so we have to operate on
 		// the full path without any assumptions on posix directory hierarchy
 		// here.  Usually the delimiter will be "/", but thats not required.
-		suffix := strings.TrimPrefix(path, prefix)
+		var suffix = strings.TrimPrefix(path, prefix)
+		// TODO this prefix handling is overcomplicated, fix
+		if root == prefix && !strings.HasSuffix(prefix, "/") {
+			suffix = strings.TrimPrefix(path, prefix+"/")
+		}
+		fmt.Println("CCCC", path, suffix, prefix, strings.TrimPrefix(path, prefix))
 		before, _, found := strings.Cut(suffix, delimiter)
 		if !found {
 			obj, err := getObj(path, info)
@@ -245,7 +255,7 @@ func (h *HDFS) Walk(ctx context.Context, bucket string, prefix, delimiter, marke
 			}
 			objects = append(objects, obj)
 			if (len(objects) + cpmap.Len()) == int(max) {
-				newMarker = path
+				newMarker = strings.TrimPrefix(path, markerTrimPrefix)
 				pastMax = true
 			}
 			return skipflag
@@ -254,8 +264,13 @@ func (h *HDFS) Walk(ctx context.Context, bucket string, prefix, delimiter, marke
 		// Common prefixes are a set, so should not have duplicates.
 		// These are abstractly a "directory", so need to include the
 		// delimiter at the end when we add to the map.
-		cprefNoDelim := prefix + before
-		cpref := prefix + before + delimiter
+		cprefNoDelim := strings.TrimPrefix(prefix, markerTrimPrefix) + before
+		cpref := strings.TrimPrefix(prefix, markerTrimPrefix) + before + delimiter
+		if prefix+"/" == markerTrimPrefix {
+			cprefNoDelim = before
+			cpref = before + delimiter
+
+		}
 		if cpref == marker {
 			pastMarker = true
 			return skipflag
@@ -278,7 +293,8 @@ func (h *HDFS) Walk(ctx context.Context, bucket string, prefix, delimiter, marke
 
 		return skipflag
 	})
-	if err != nil {
+	// gohdfs Walk returns fs.SkipAll if that's returned by the WalkFunc
+	if err != nil && !errors.Is(err, fs.SkipAll) {
 		// suppress file not found caused by user's prefix
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 			return WalkResults{}, nil

@@ -4510,13 +4510,17 @@ func (h *HDFS) getAttrTags(bucket, object string) (map[string]string, error) {
 }
 
 func (h *HDFS) PutObjectTagging(_ context.Context, bucket, object string, tags map[string]string) error {
-	_, err := h.client.Stat(filepath.Join(h.rootdir, bucket))
-	if errors.Is(err, fs.ErrNotExist) {
-		return s3err.GetAPIError(s3err.ErrNoSuchBucket)
-	}
+	err := h.doesBucketAndObjectExist(bucket, object)
 	if err != nil {
-		return fmt.Errorf("stat bucket: %w", err)
+		return err
 	}
+	// _, err := h.client.Stat(filepath.Join(h.rootdir, bucket))
+	// if errors.Is(err, fs.ErrNotExist) {
+	// 	return s3err.GetAPIError(s3err.ErrNoSuchBucket)
+	// }
+	// if err != nil {
+	// 	return fmt.Errorf("stat bucket: %w", err)
+	// }
 
 	if tags == nil {
 		err = h.meta.DeleteAttribute(bucket, object, tagHdr)
