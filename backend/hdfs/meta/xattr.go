@@ -52,7 +52,7 @@ func (x HdfsXattrMeta) RetrieveAttribute(fullpath, bucket, object, attribute str
 	if err != nil {
 		return nil, err
 	}
-	return []byte(b[attribute]), err
+	return []byte(b[xattrPrefix+attribute]), err
 }
 
 // StoreAttribute stores the value of a specific attribute for an object in a bucket.
@@ -73,7 +73,7 @@ func (x HdfsXattrMeta) StoreAttribute(fullpath, bucket, object, attribute string
 func (x HdfsXattrMeta) DeleteAttribute(bucket, object, attribute string) error {
 	err := x.client.RemoveXAttr(filepath.Join(x.rootdir, bucket, object), xattrPrefix+attribute)
 	var pathErr *os.PathError
-	if errors.As(err, &pathErr) && pathErr.Op == "remove xattrs" {
+	if errors.As(err, &pathErr) && pathErr.Op == "remove xattr" {
 		return ErrNoSuchKey
 	}
 	return err

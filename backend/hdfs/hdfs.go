@@ -4306,7 +4306,6 @@ func (h *HDFS) fileToObj(bucket string, fetchOwner bool) GetObjFunc {
 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 			return s3response.Object{}, fmt.Errorf("get etag: %w", err)
 		}
-		fmt.Println("MMMM", err, bucket, path, object)
 		// note: meta.ErrNoSuchKey will return etagBytes = []byte{}
 		// so this will just set etag to "" if its not already set
 
@@ -5032,7 +5031,15 @@ func (h *HDFS) openTmpFile(bucket string, size int64) (*tmpfile, error) {
 	// TODO fix replication and blocksize
 	// TODO fix perm
 	tmpFileName := filepath.Join(tmpDir, uuid.New().String())
-	fw, err := h.client.Create(tmpFileName)
+	// Create an empty file to allow xattrs to be written to it
+	err = h.client.CreateEmptyFile(tmpFileName)
+	if err != nil {
+		if errors.Is(err, syscall.EROFS) {
+			return nil, s3err.GetAPIError(s3err.ErrMethodNotAllowed)
+		}
+		return nil, fmt.Errorf("create temp file: %w", err)
+	}
+	fw, err := h.client.Append(tmpFileName)
 	if err != nil {
 		if errors.Is(err, syscall.EROFS) {
 			return nil, s3err.GetAPIError(s3err.ErrMethodNotAllowed)

@@ -15,6 +15,8 @@
 package meta
 
 import (
+	"errors"
+
 	backendmeta "github.com/versity/versitygw/backend/meta"
 )
 
@@ -33,9 +35,21 @@ func NewSideCar(dir string) (SideCar, error) {
 }
 
 func (s SideCar) RetrieveAttribute(_, bucket, object, attribute string) ([]byte, error) {
-	return s.SideCar.RetrieveAttribute(nil, bucket, object, attribute)
+	b, err := s.SideCar.RetrieveAttribute(nil, bucket, object, attribute)
+	if errors.Is(err, backendmeta.ErrNoSuchKey) {
+		return nil, ErrNoSuchKey
+	}
+	return b, err
 }
 
 func (s SideCar) StoreAttribute(_, bucket, object, attribute string, value []byte) error {
 	return s.SideCar.StoreAttribute(nil, bucket, object, attribute, value)
+}
+
+func (s SideCar) DeleteAttribute(bucket, object, attribute string) error {
+	err := s.SideCar.DeleteAttribute(bucket, object, attribute)
+	if errors.Is(err, backendmeta.ErrNoSuchKey) {
+		return ErrNoSuchKey
+	}
+	return err
 }
