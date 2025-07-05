@@ -41,7 +41,7 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/versity/versitygw/auth"
 	"github.com/versity/versitygw/backend"
-	"github.com/versity/versitygw/backend/meta"
+	"github.com/versity/versitygw/backend/hdfs/meta"
 	"github.com/versity/versitygw/s3api/utils"
 	"github.com/versity/versitygw/s3err"
 	"github.com/versity/versitygw/s3response"
@@ -129,7 +129,7 @@ type HDFSOpts struct {
 	ForceNoTmpFile bool
 }
 
-func New(address string, rootdir string, meta meta.MetadataStorer, opts HDFSOpts) (*HDFS, error) {
+func New(address string, rootdir string, ms meta.MetadataStorer, opts HDFSOpts) (*HDFS, error) {
 	if opts.SideCarDir != "" && strings.HasPrefix(opts.SideCarDir, rootdir) {
 		return nil, fmt.Errorf("sidecar directory cannot be inside the gateway root directory")
 	}
@@ -161,8 +161,11 @@ func New(address string, rootdir string, meta meta.MetadataStorer, opts HDFSOpts
 	// 	fmt.Println("Bucket versioning enabled with directory:", verioningdirAbs)
 	// }
 
+	if ms == nil {
+		ms = meta.NewHdfsXattrMeta(client, rootdir)
+	}
 	return &HDFS{
-		meta:     meta,
+		meta:     ms,
 		client:   client,
 		rootdir:  rootdir,
 		euid:     os.Geteuid(), // TODO CHECK
@@ -282,7 +285,7 @@ func (h *HDFS) ListBuckets(_ context.Context, input s3response.ListBucketsInput)
 			continue
 		}
 
-		aclJSON, err := h.meta.RetrieveAttribute(nil, fi.Name(), "", aclkey)
+		aclJSON, err := h.meta.RetrieveAttribute("", fi.Name(), "", aclkey)
 		if errors.Is(err, meta.ErrNoSuchKey) {
 			// skip buckets without acl tag
 			continue
@@ -348,7 +351,7 @@ func (h *HDFS) CreateBucket(ctx context.Context, input *s3.CreateBucketInput, ac
 
 	err := h.client.Mkdir(filepath.Join(h.rootdir, bucket), h.newDirPerm)
 	if err != nil && os.IsExist(err) {
-		aclJSON, err := h.meta.RetrieveAttribute(nil, bucket, "", aclkey)
+		aclJSON, err := h.meta.RetrieveAttribute("", bucket, "", aclkey)
 		if err != nil {
 			return fmt.Errorf("get bucket acl: %w", err)
 		}
@@ -377,11 +380,11 @@ func (h *HDFS) CreateBucket(ctx context.Context, input *s3.CreateBucketInput, ac
 		}
 	}
 
-	err = h.meta.StoreAttribute(nil, bucket, "", aclkey, acl)
+	err = h.meta.StoreAttribute("", bucket, "", aclkey, acl)
 	if err != nil {
 		return fmt.Errorf("set acl: %w", err)
 	}
-	err = h.meta.StoreAttribute(nil, bucket, "", ownershipkey, []byte(input.ObjectOwnership))
+	err = h.meta.StoreAttribute("", bucket, "", ownershipkey, []byte(input.ObjectOwnership))
 	if err != nil {
 		return fmt.Errorf("set ownership: %w", err)
 	}
@@ -407,7 +410,7 @@ func (h *HDFS) CreateBucket(ctx context.Context, input *s3.CreateBucketInput, ac
 			return fmt.Errorf("parse default bucket lock state: %w", err)
 		}
 
-		err = h.meta.StoreAttribute(nil, bucket, "", bucketLockKey, defaultLockParsed)
+		err = h.meta.StoreAttribute("", bucket, "", bucketLockKey, defaultLockParsed)
 		if err != nil {
 			return fmt.Errorf("set default bucket lock: %w", err)
 		}
@@ -483,7 +486,7 @@ func (h *HDFS) PutBucketOwnershipControls(_ context.Context, bucket string, owne
 		return fmt.Errorf("stat bucket: %w", err)
 	}
 
-	err = h.meta.StoreAttribute(nil, bucket, "", ownershipkey, []byte(ownership))
+	err = h.meta.StoreAttribute("", bucket, "", ownershipkey, []byte(ownership))
 	if err != nil {
 		return fmt.Errorf("set ownership: %w", err)
 	}
@@ -501,7 +504,7 @@ func (h *HDFS) GetBucketOwnershipControls(_ context.Context, bucket string) (typ
 		return ownship, fmt.Errorf("stat bucket: %w", err)
 	}
 
-	ownership, err := h.meta.RetrieveAttribute(nil, bucket, "", ownershipkey)
+	ownership, err := h.meta.RetrieveAttribute("", bucket, "", ownershipkey)
 	if errors.Is(err, meta.ErrNoSuchKey) {
 		return ownship, s3err.GetAPIError(s3err.ErrOwnershipControlsNotFound)
 	}
@@ -570,7 +573,7 @@ func (h *HDFS) PutBucketVersioning(ctx context.Context, bucket string, status ty
 		versioning = []byte{0}
 	}
 
-	err = h.meta.StoreAttribute(nil, bucket, "", versioningKey, versioning)
+	err = h.meta.StoreAttribute("", bucket, "", versioningKey, versioning)
 	if err != nil {
 		return fmt.Errorf("set versioning: %w", err)
 	}
@@ -591,7 +594,7 @@ func (h *HDFS) GetBucketVersioning(_ context.Context, bucket string) (s3response
 		return s3response.GetBucketVersioningOutput{}, fmt.Errorf("stat bucket: %w", err)
 	}
 
-	vData, err := h.meta.RetrieveAttribute(nil, bucket, "", versioningKey)
+	vData, err := h.meta.RetrieveAttribute("", bucket, "", versioningKey)
 	if errors.Is(err, meta.ErrNoSuchKey) {
 		return s3response.GetBucketVersioningOutput{}, nil
 	} else if err != nil {
@@ -788,7 +791,7 @@ func (h *HDFS) isBucketVersioningEnabled(s types.BucketVersioningStatus) bool {
 
 // Check if the given object is a delete marker
 func (h *HDFS) isObjDeleteMarker(bucket, object string) (bool, error) {
-	_, err := h.meta.RetrieveAttribute(nil, bucket, object, deleteMarkerKey)
+	_, err := h.meta.RetrieveAttribute("", bucket, object, deleteMarkerKey)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		return false, s3err.GetAPIError(s3err.ErrNoSuchKey)
 	}
@@ -1221,7 +1224,7 @@ func (h *HDFS) CreateMultipartUpload(ctx context.Context, mpu s3response.CreateM
 
 	// set an attribute with the original object name so that we can
 	// map the hashed name back to the original object name
-	err = h.meta.StoreAttribute(nil, bucket, objdir, onameAttr, []byte(object))
+	err = h.meta.StoreAttribute("", bucket, objdir, onameAttr, []byte(object))
 	if err != nil {
 		// if we fail, cleanup the container directories
 		// but ignore errors because there might still be
@@ -1233,7 +1236,7 @@ func (h *HDFS) CreateMultipartUpload(ctx context.Context, mpu s3response.CreateM
 
 	// set user metadata
 	for k, v := range mpu.Metadata {
-		err := h.meta.StoreAttribute(nil, bucket, filepath.Join(objdir, uploadID),
+		err := h.meta.StoreAttribute("", bucket, filepath.Join(objdir, uploadID),
 			fmt.Sprintf("%v.%v", metaHdr, k), []byte(v))
 		if err != nil {
 			// cleanup object if returning error
@@ -1254,7 +1257,7 @@ func (h *HDFS) CreateMultipartUpload(ctx context.Context, mpu s3response.CreateM
 		}
 	}
 
-	err = h.storeObjectMetadata(nil, bucket, filepath.Join(objdir, uploadID), objectMetadata{
+	err = h.storeObjectMetadata("", bucket, filepath.Join(objdir, uploadID), objectMetadata{
 		ContentType:        mpu.ContentType,
 		ContentEncoding:    mpu.ContentEncoding,
 		ContentDisposition: mpu.ContentDisposition,
@@ -1304,7 +1307,7 @@ func (h *HDFS) CreateMultipartUpload(ctx context.Context, mpu s3response.CreateM
 
 	// Set object checksum algorithm
 	if mpu.ChecksumAlgorithm != "" {
-		err := h.storeChecksums(nil, bucket, filepath.Join(objdir, uploadID), s3response.Checksum{
+		err := h.storeChecksums("", bucket, filepath.Join(objdir, uploadID), s3response.Checksum{
 			Algorithm: mpu.ChecksumAlgorithm,
 			Type:      mpu.ChecksumType,
 		})
@@ -1399,7 +1402,7 @@ func (h *HDFS) CompleteMultipartUpload(ctx context.Context, input *s3.CompleteMu
 
 	objdir := filepath.Join(metaTmpMultipartDir, fmt.Sprintf("%x", sum))
 
-	checksums, err := h.retrieveChecksums(nil, bucket, filepath.Join(objdir, uploadID))
+	checksums, err := h.retrieveChecksums("", bucket, filepath.Join(objdir, uploadID))
 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 		return res, "", fmt.Errorf("get mp checksums: %w", err)
 	}
@@ -1451,7 +1454,7 @@ func (h *HDFS) CompleteMultipartUpload(ctx context.Context, input *s3.CompleteMu
 			return res, "", s3err.GetAPIError(s3err.ErrEntityTooSmall)
 		}
 
-		b, err := h.meta.RetrieveAttribute(nil, bucket, partObjPath, etagkey)
+		b, err := h.meta.RetrieveAttribute("", bucket, partObjPath, etagkey)
 		etag := string(b)
 		if err != nil {
 			etag = ""
@@ -1460,7 +1463,7 @@ func (h *HDFS) CompleteMultipartUpload(ctx context.Context, input *s3.CompleteMu
 			return res, "", s3err.GetAPIError(s3err.ErrInvalidPart)
 		}
 
-		partChecksum, err := h.retrieveChecksums(nil, bucket, partObjPath)
+		partChecksum, err := h.retrieveChecksums("", bucket, partObjPath)
 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 			return res, "", fmt.Errorf("get part checksum: %w", err)
 		}
@@ -1534,7 +1537,7 @@ func (h *HDFS) CompleteMultipartUpload(ctx context.Context, input *s3.CompleteMu
 	userMetaData := make(map[string]string)
 	objMeta := h.loadObjectMetaData(bucket, upiddir, nil, userMetaData)
 	// TODO nil below because we are using the sidecar
-	err = h.storeObjectMetadata(nil, bucket, object, objMeta)
+	err = h.storeObjectMetadata(f.tmpFileName, bucket, object, objMeta)
 	if err != nil {
 		return res, "", err
 	}
@@ -1579,33 +1582,33 @@ func (h *HDFS) CompleteMultipartUpload(ctx context.Context, input *s3.CompleteMu
 
 	for k, v := range userMetaData {
 		// TODO nil below because we are using the sidecar
-		err = h.meta.StoreAttribute(nil, bucket, object, fmt.Sprintf("%v.%v", metaHdr, k), []byte(v))
+		err = h.meta.StoreAttribute(f.tmpFileName, bucket, object, fmt.Sprintf("%v.%v", metaHdr, k), []byte(v))
 		if err != nil {
 			return res, "", fmt.Errorf("set user attr %q: %w", k, err)
 		}
 	}
 
 	// load and set tagging
-	tagging, err := h.meta.RetrieveAttribute(nil, bucket, upiddir, tagHdr)
+	tagging, err := h.meta.RetrieveAttribute("", bucket, upiddir, tagHdr)
 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 		return res, "", fmt.Errorf("get object tagging: %w", err)
 	}
 	if err == nil {
 		// TODO nil below because we are using the sidecar
-		err := h.meta.StoreAttribute(nil, bucket, object, tagHdr, tagging)
+		err := h.meta.StoreAttribute(f.tmpFileName, bucket, object, tagHdr, tagging)
 		if err != nil {
 			return res, "", fmt.Errorf("set object tagging: %w", err)
 		}
 	}
 
 	// load and set legal hold
-	lHold, err := h.meta.RetrieveAttribute(nil, bucket, upiddir, objectLegalHoldKey)
+	lHold, err := h.meta.RetrieveAttribute("", bucket, upiddir, objectLegalHoldKey)
 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 		return res, "", fmt.Errorf("get object legal hold: %w", err)
 	}
 	if err == nil {
 		// TODO nil below because we are using the sidecar
-		err := h.meta.StoreAttribute(nil, bucket, object, objectLegalHoldKey, lHold)
+		err := h.meta.StoreAttribute(f.tmpFileName, bucket, object, objectLegalHoldKey, lHold)
 		if err != nil {
 			return res, "", fmt.Errorf("set object legal hold: %w", err)
 		}
@@ -1665,20 +1668,20 @@ func (h *HDFS) CompleteMultipartUpload(ctx context.Context, input *s3.CompleteMu
 			crc64nvme = &sum
 		}
 		// TODO nil below because we are using the sidecar
-		err := h.storeChecksums(nil, bucket, object, checksum)
+		err := h.storeChecksums(f.tmpFileName, bucket, object, checksum)
 		if err != nil {
 			return res, "", fmt.Errorf("store object checksum: %w", err)
 		}
 	}
 
 	// load and set retention
-	ret, err := h.meta.RetrieveAttribute(nil, bucket, upiddir, objectRetentionKey)
+	ret, err := h.meta.RetrieveAttribute("", bucket, upiddir, objectRetentionKey)
 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 		return res, "", fmt.Errorf("get object retention: %w", err)
 	}
 	if err == nil {
 		// TODO nil below because we are using the sidecar
-		err := h.meta.StoreAttribute(nil, bucket, object, objectRetentionKey, ret)
+		err := h.meta.StoreAttribute(f.tmpFileName, bucket, object, objectRetentionKey, ret)
 		if err != nil {
 			return res, "", fmt.Errorf("set object retention: %w", err)
 		}
@@ -1688,7 +1691,7 @@ func (h *HDFS) CompleteMultipartUpload(ctx context.Context, input *s3.CompleteMu
 	s3MD5 := backend.GetMultipartMD5(parts)
 
 	// TODO nil below because we are using the sidecar
-	err = h.meta.StoreAttribute(nil, bucket, object, etagkey, []byte(s3MD5))
+	err = h.meta.StoreAttribute(f.tmpFileName, bucket, object, etagkey, []byte(s3MD5))
 	if err != nil {
 		return res, "", fmt.Errorf("set etag attr: %w", err)
 	}
@@ -1842,7 +1845,7 @@ func (h *HDFS) loadObjectMetaData(bucket, object string, fi *os.FileInfo, m map[
 			if !isValidMeta(e) {
 				continue
 			}
-			b, err := h.meta.RetrieveAttribute(nil, bucket, object, e)
+			b, err := h.meta.RetrieveAttribute("", bucket, object, e)
 			if err != nil {
 				continue
 			}
@@ -1856,7 +1859,7 @@ func (h *HDFS) loadObjectMetaData(bucket, object string, fi *os.FileInfo, m map[
 
 	var result objectMetadata
 
-	b, err := h.meta.RetrieveAttribute(nil, bucket, object, contentTypeHdr)
+	b, err := h.meta.RetrieveAttribute("", bucket, object, contentTypeHdr)
 	if err == nil {
 		result.ContentType = backend.GetPtrFromString(string(b))
 	}
@@ -1868,27 +1871,27 @@ func (h *HDFS) loadObjectMetaData(bucket, object string, fi *os.FileInfo, m map[
 		}
 	}
 
-	b, err = h.meta.RetrieveAttribute(nil, bucket, object, contentEncHdr)
+	b, err = h.meta.RetrieveAttribute("", bucket, object, contentEncHdr)
 	if err == nil {
 		result.ContentEncoding = backend.GetPtrFromString(string(b))
 	}
 
-	b, err = h.meta.RetrieveAttribute(nil, bucket, object, contentDispHdr)
+	b, err = h.meta.RetrieveAttribute("", bucket, object, contentDispHdr)
 	if err == nil {
 		result.ContentDisposition = backend.GetPtrFromString(string(b))
 	}
 
-	b, err = h.meta.RetrieveAttribute(nil, bucket, object, contentLangHdr)
+	b, err = h.meta.RetrieveAttribute("", bucket, object, contentLangHdr)
 	if err == nil {
 		result.ContentLanguage = backend.GetPtrFromString(string(b))
 	}
 
-	b, err = h.meta.RetrieveAttribute(nil, bucket, object, cacheCtrlHdr)
+	b, err = h.meta.RetrieveAttribute("", bucket, object, cacheCtrlHdr)
 	if err == nil {
 		result.CacheControl = backend.GetPtrFromString(string(b))
 	}
 
-	b, err = h.meta.RetrieveAttribute(nil, bucket, object, expiresHdr)
+	b, err = h.meta.RetrieveAttribute("", bucket, object, expiresHdr)
 	if err == nil {
 		result.Expires = backend.GetPtrFromString(string(b))
 	}
@@ -1896,39 +1899,39 @@ func (h *HDFS) loadObjectMetaData(bucket, object string, fi *os.FileInfo, m map[
 	return result
 }
 
-func (h *HDFS) storeObjectMetadata(f *os.File, bucket, object string, m objectMetadata) error {
+func (h *HDFS) storeObjectMetadata(fullpath, bucket, object string, m objectMetadata) error {
 	if getString(m.ContentType) != "" {
-		err := h.meta.StoreAttribute(f, bucket, object, contentTypeHdr, []byte(*m.ContentType))
+		err := h.meta.StoreAttribute(fullpath, bucket, object, contentTypeHdr, []byte(*m.ContentType))
 		if err != nil {
 			return fmt.Errorf("set content-type: %w", err)
 		}
 	}
 	if getString(m.ContentEncoding) != "" {
-		err := h.meta.StoreAttribute(f, bucket, object, contentEncHdr, []byte(*m.ContentEncoding))
+		err := h.meta.StoreAttribute(fullpath, bucket, object, contentEncHdr, []byte(*m.ContentEncoding))
 		if err != nil {
 			return fmt.Errorf("set content-encoding: %w", err)
 		}
 	}
 	if getString(m.ContentDisposition) != "" {
-		err := h.meta.StoreAttribute(f, bucket, object, contentDispHdr, []byte(*m.ContentDisposition))
+		err := h.meta.StoreAttribute(fullpath, bucket, object, contentDispHdr, []byte(*m.ContentDisposition))
 		if err != nil {
 			return fmt.Errorf("set content-disposition: %w", err)
 		}
 	}
 	if getString(m.ContentLanguage) != "" {
-		err := h.meta.StoreAttribute(f, bucket, object, contentLangHdr, []byte(*m.ContentLanguage))
+		err := h.meta.StoreAttribute(fullpath, bucket, object, contentLangHdr, []byte(*m.ContentLanguage))
 		if err != nil {
 			return fmt.Errorf("set content-language: %w", err)
 		}
 	}
 	if getString(m.CacheControl) != "" {
-		err := h.meta.StoreAttribute(f, bucket, object, cacheCtrlHdr, []byte(*m.CacheControl))
+		err := h.meta.StoreAttribute(fullpath, bucket, object, cacheCtrlHdr, []byte(*m.CacheControl))
 		if err != nil {
 			return fmt.Errorf("set cache-control: %w", err)
 		}
 	}
 	if getString(m.Expires) != "" {
-		err := h.meta.StoreAttribute(f, bucket, object, expiresHdr, []byte(*m.Expires))
+		err := h.meta.StoreAttribute(fullpath, bucket, object, expiresHdr, []byte(*m.Expires))
 		if err != nil {
 			return fmt.Errorf("set cache-control: %w", err)
 		}
@@ -2027,7 +2030,7 @@ func (h *HDFS) ListMultipartUploads(_ context.Context, mpu *s3.ListMultipartUplo
 			continue
 		}
 
-		b, err := h.meta.RetrieveAttribute(nil, bucket, filepath.Join(metaTmpMultipartDir, obj.Name()), onameAttr)
+		b, err := h.meta.RetrieveAttribute("", bucket, filepath.Join(metaTmpMultipartDir, obj.Name()), onameAttr)
 		if err != nil {
 			continue
 		}
@@ -2059,7 +2062,7 @@ func (h *HDFS) ListMultipartUploads(_ context.Context, mpu *s3.ListMultipartUplo
 				keyMarkerInd = len(uploads)
 			}
 
-			checksum, err := h.retrieveChecksums(nil, bucket, filepath.Join(metaTmpMultipartDir, obj.Name(), uploadID))
+			checksum, err := h.retrieveChecksums("", bucket, filepath.Join(metaTmpMultipartDir, obj.Name(), uploadID))
 			if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 				return lmu, fmt.Errorf("get mp checksum: %w", err)
 			}
@@ -2184,7 +2187,9 @@ func (h *HDFS) ListParts(ctx context.Context, input *s3.ListPartsInput) (s3respo
 		return lpr, fmt.Errorf("readdir upload: %w", err)
 	}
 
-	checksum, err := h.retrieveChecksums(nil, tmpdir, uploadID)
+	// ATTENTION line below was like this but seems wrong
+	//checksum, err := h.retrieveChecksums(nil, tmpdir, uploadID)
+	checksum, err := h.retrieveChecksums("", bucket, filepath.Join(objdir, uploadID))
 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 		return lpr, fmt.Errorf("get mp checksum: %w", err)
 	}
@@ -2214,13 +2219,13 @@ func (h *HDFS) ListParts(ctx context.Context, input *s3.ListPartsInput) (s3respo
 		}
 
 		partPath := filepath.Join(objdir, uploadID, e.Name())
-		b, err := h.meta.RetrieveAttribute(nil, bucket, partPath, etagkey)
+		b, err := h.meta.RetrieveAttribute("", bucket, partPath, etagkey)
 		etag := string(b)
 		if err != nil {
 			etag = ""
 		}
 
-		checksum, err := h.retrieveChecksums(nil, bucket, partPath)
+		checksum, err := h.retrieveChecksums("", bucket, partPath)
 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 			continue
 		}
@@ -2369,7 +2374,7 @@ func (h *HDFS) UploadPart(ctx context.Context, input *s3.UploadPartInput) (*s3.U
 		tr = hashRdr
 	}
 
-	checksums, chErr := h.retrieveChecksums(nil, bucket, mpPath)
+	checksums, chErr := h.retrieveChecksums("", bucket, mpPath)
 	if chErr != nil && !errors.Is(chErr, meta.ErrNoSuchKey) {
 		return nil, fmt.Errorf("retreive mp checksum: %w", chErr)
 	}
@@ -2398,8 +2403,7 @@ func (h *HDFS) UploadPart(ctx context.Context, input *s3.UploadPartInput) (*s3.U
 	}
 
 	etag := backend.GenerateEtag(hash)
-	// TODO nil because we are using sidecar
-	err = h.meta.StoreAttribute(nil, bucket, partPath, etagkey, []byte(etag))
+	err = h.meta.StoreAttribute(f.tmpFileName, bucket, partPath, etagkey, []byte(etag))
 	if err != nil {
 		return nil, fmt.Errorf("set etag attr: %w", err)
 	}
@@ -2436,8 +2440,7 @@ func (h *HDFS) UploadPart(ctx context.Context, input *s3.UploadPartInput) (*s3.U
 		// Store the checksums if the checksum type has been
 		// specified on mp initialization
 		if checksums.Type != "" {
-			// TODO nil because we are using sidecar
-			err := h.storeChecksums(nil, bucket, partPath, checksum)
+			err := h.storeChecksums(f.tmpFileName, bucket, partPath, checksum)
 			if err != nil {
 				return nil, fmt.Errorf("store checksum: %w", err)
 			}
@@ -2571,12 +2574,14 @@ func (h *HDFS) UploadPartCopy(ctx context.Context, upi *s3.UploadPartCopyInput) 
 	hash := md5.New()
 	tr := io.TeeReader(rdr, hash)
 
-	mpChecksums, err := h.retrieveChecksums(nil, *upi.Bucket, filepath.Join(objdir, *upi.UploadId))
+	mpChecksums, err := h.retrieveChecksums("", *upi.Bucket, filepath.Join(objdir, *upi.UploadId))
 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 		return s3response.CopyPartResult{}, fmt.Errorf("retreive mp checksums: %w", err)
 	}
 
-	checksums, err := h.retrieveChecksums(nil, objPath, "")
+	// ATTENTION this was like this but seems like an abuse
+	//checksums, err := h.retrieveChecksums(nil, objPath, "")
+	checksums, err := h.retrieveChecksums("", srcBucket, srcObject)
 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 		return s3response.CopyPartResult{}, fmt.Errorf("retreive object part checksums: %w", err)
 	}
@@ -2607,8 +2612,9 @@ func (h *HDFS) UploadPartCopy(ctx context.Context, upi *s3.UploadPartCopyInput) 
 			checksums = s3response.Checksum{}
 		} else {
 			if hashRdr == nil {
-				// TODO nil because we are using sidecar
-				err := h.storeChecksums(nil, objPath, "", checksums)
+				// ATTENTION this was like this but seems like an abuse
+				//err := p.storeChecksums(f.File(), objPath, "", checksums)
+				err := h.storeChecksums(f.tmpFileName, *upi.Bucket, partPath, checksums)
 				if err != nil {
 					return s3response.CopyPartResult{}, fmt.Errorf("store part checksum: %w", err)
 				}
@@ -2636,15 +2642,15 @@ func (h *HDFS) UploadPartCopy(ctx context.Context, upi *s3.UploadPartCopyInput) 
 		}
 
 		// TODO nil because we are using sidecar
-		err := h.storeChecksums(nil, objPath, "", checksums)
+		// ATTENTION this was like this but seems like an abuse
+		err := h.storeChecksums(f.tmpFileName, *upi.Bucket, partPath, checksums)
 		if err != nil {
 			return s3response.CopyPartResult{}, fmt.Errorf("store part checksum: %w", err)
 		}
 	}
 
 	etag := backend.GenerateEtag(hash)
-	// TODO nil because we are using sidecar
-	err = h.meta.StoreAttribute(nil, *upi.Bucket, partPath, etagkey, []byte(etag))
+	err = h.meta.StoreAttribute(f.tmpFileName, *upi.Bucket, partPath, etagkey, []byte(etag))
 	if err != nil {
 		return s3response.CopyPartResult{}, fmt.Errorf("set etag attr: %w", err)
 	}
@@ -2729,7 +2735,7 @@ func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3r
 		}
 
 		for k, v := range po.Metadata {
-			err := h.meta.StoreAttribute(nil, *po.Bucket, *po.Key,
+			err := h.meta.StoreAttribute("", *po.Bucket, *po.Key,
 				fmt.Sprintf("%v.%v", metaHdr, k), []byte(v))
 			if err != nil {
 				return s3response.PutObjectOutput{}, fmt.Errorf("set user attr %q: %w", k, err)
@@ -2737,14 +2743,14 @@ func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3r
 		}
 
 		// set etag attribute to signify this dir was specifically put
-		err = h.meta.StoreAttribute(nil, *po.Bucket, *po.Key, etagkey,
+		err = h.meta.StoreAttribute("", *po.Bucket, *po.Key, etagkey,
 			[]byte(emptyMD5))
 		if err != nil {
 			return s3response.PutObjectOutput{}, fmt.Errorf("set etag attr: %w", err)
 		}
 
 		// set "application/x-directory" content-type
-		err = h.meta.StoreAttribute(nil, *po.Bucket, *po.Key, contentTypeHdr,
+		err = h.meta.StoreAttribute("", *po.Bucket, *po.Key, contentTypeHdr,
 			[]byte(backend.DirContentType))
 		if err != nil {
 			return s3response.PutObjectOutput{}, fmt.Errorf("set content-type attr: %w", err)
@@ -2765,7 +2771,6 @@ func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3r
 	// object is file
 	d, err := h.client.Stat(name)
 	if err == nil && d.IsDir() {
-		fmt.Println("CCCC", err)
 		return s3response.PutObjectOutput{}, s3err.GetAPIError(s3err.ErrExistingObjectIsDirectory)
 	}
 
@@ -2852,7 +2857,6 @@ func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3r
 		// TODO Figure out chown here
 		err = h.client.MkdirAll(dir, h.newDirPerm)
 		if err != nil {
-			fmt.Println("AAAA", err)
 			return s3response.PutObjectOutput{}, s3err.GetAPIError(s3err.ErrExistingObjectIsDirectory)
 		}
 	}
@@ -2877,8 +2881,7 @@ func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3r
 	// }
 
 	for k, v := range po.Metadata {
-		// TODO nil here only ok because we are using sidecar, needs to be fixed for xattrs
-		err := h.meta.StoreAttribute(nil, *po.Bucket, *po.Key,
+		err := h.meta.StoreAttribute(f.tmpFileName, *po.Bucket, *po.Key,
 			fmt.Sprintf("%v.%v", metaHdr, k), []byte(v))
 		if err != nil {
 			return s3response.PutObjectOutput{}, fmt.Errorf("set user attr %q: %w", k, err)
@@ -2910,20 +2913,17 @@ func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3r
 			checksum.CRC64NVME = &sum
 			checksum.Algorithm = types.ChecksumAlgorithmCrc64nvme
 		}
-		// TODO nil here only ok because we are using sidecar, needs to be fixed for xattrs
-		err := h.storeChecksums(nil, *po.Bucket, *po.Key, checksum)
+		err := h.storeChecksums(f.tmpFileName, *po.Bucket, *po.Key, checksum)
 		if err != nil {
 			return s3response.PutObjectOutput{}, fmt.Errorf("store checksum: %w", err)
 		}
 	}
-	// TODO nil here only ok because we are using sidecar, needs to be fixed for xattrs
-	err = h.meta.StoreAttribute(nil, *po.Bucket, *po.Key, etagkey, []byte(etag))
+	err = h.meta.StoreAttribute(f.tmpFileName, *po.Bucket, *po.Key, etagkey, []byte(etag))
 	if err != nil {
 		return s3response.PutObjectOutput{}, fmt.Errorf("set etag attr: %w", err)
 	}
 
-	// TODO nil here only ok because we are using sidecar, needs to be fixed for xattrs
-	err = h.storeObjectMetadata(nil, *po.Bucket, *po.Key, objectMetadata{
+	err = h.storeObjectMetadata(f.tmpFileName, *po.Bucket, *po.Key, objectMetadata{
 		ContentType:        po.ContentType,
 		ContentEncoding:    po.ContentEncoding,
 		ContentLanguage:    po.ContentLanguage,
@@ -2950,7 +2950,6 @@ func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3r
 		}, nil
 	}
 	if err != nil {
-		fmt.Println("BBBB", err)
 		return s3response.PutObjectOutput{}, s3err.GetAPIError(s3err.ErrExistingObjectIsDirectory)
 	}
 
@@ -3254,7 +3253,7 @@ func (h *HDFS) DeleteObject(ctx context.Context, input *s3.DeleteObjectInput) (*
 	if errors.Is(err, syscall.ENOTEMPTY) {
 		// If the directory object has been uploaded explicitly
 		// remove the directory object (remove the ETag)
-		_, err = h.meta.RetrieveAttribute(nil, bucket, object, etagkey)
+		_, err = h.meta.RetrieveAttribute("", bucket, object, etagkey)
 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 			return nil, fmt.Errorf("get object etag: %w", err)
 		}
@@ -3300,7 +3299,7 @@ func (h *HDFS) removeParents(bucket, object string) {
 			break
 		}
 
-		_, err := h.meta.RetrieveAttribute(nil, bucket, parent, etagkey)
+		_, err := h.meta.RetrieveAttribute("", bucket, parent, etagkey)
 		if err == nil {
 			// a directory with a valid etag means this was specifically
 			// uploaded with a put object, so stop here and leave this
@@ -3472,7 +3471,7 @@ func (h *HDFS) GetObject(_ context.Context, input *s3.GetObjectInput) (*s3.GetOb
 		userMetaData := make(map[string]string)
 
 		objMeta := h.loadObjectMetaData(bucket, object, &fi, userMetaData)
-		b, err := h.meta.RetrieveAttribute(nil, bucket, object, etagkey)
+		b, err := h.meta.RetrieveAttribute("", bucket, object, etagkey)
 		etag := string(b)
 		if err != nil {
 			etag = ""
@@ -3509,7 +3508,7 @@ func (h *HDFS) GetObject(_ context.Context, input *s3.GetObjectInput) (*s3.GetOb
 
 	// If versioning is configured get the object versionId
 	if h.versioningEnabled() && versionId == "" {
-		vId, err := h.meta.RetrieveAttribute(nil, bucket, object, versionIdKey)
+		vId, err := h.meta.RetrieveAttribute("", bucket, object, versionIdKey)
 		if errors.Is(err, meta.ErrNoSuchKey) {
 			versionId = nullVersionId
 		} else if err != nil {
@@ -3523,7 +3522,7 @@ func (h *HDFS) GetObject(_ context.Context, input *s3.GetObjectInput) (*s3.GetOb
 
 	objMeta := h.loadObjectMetaData(bucket, object, &fi, userMetaData)
 
-	b, err := h.meta.RetrieveAttribute(nil, bucket, object, etagkey)
+	b, err := h.meta.RetrieveAttribute("", bucket, object, etagkey)
 	etag := string(b)
 	if err != nil {
 		etag = ""
@@ -3551,7 +3550,7 @@ func (h *HDFS) GetObject(_ context.Context, input *s3.GetObjectInput) (*s3.GetOb
 	var cType types.ChecksumType
 	// Skip the checksums retreival if object isn't requested fully
 	if input.ChecksumMode == types.ChecksumModeEnabled && length-startOffset == objSize {
-		checksums, err = h.retrieveChecksums(f, bucket, object)
+		checksums, err = h.retrieveChecksums("", bucket, object)
 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 			return nil, fmt.Errorf("get object checksums: %w", err)
 		}
@@ -3663,7 +3662,7 @@ func (h *HDFS) HeadObject(ctx context.Context, input *s3.HeadObjectInput) (*s3.H
 				startOffset, startOffset+length-1, size)
 		}
 
-		b, err := h.meta.RetrieveAttribute(nil, bucket, partPath, etagkey)
+		b, err := h.meta.RetrieveAttribute("", bucket, partPath, etagkey)
 		etag := string(b)
 		if err != nil {
 			etag = ""
@@ -3761,7 +3760,7 @@ func (h *HDFS) HeadObject(ctx context.Context, input *s3.HeadObjectInput) (*s3.H
 	userMetaData := make(map[string]string)
 	objMeta := h.loadObjectMetaData(bucket, object, &fi, userMetaData)
 
-	b, err := h.meta.RetrieveAttribute(nil, bucket, object, etagkey)
+	b, err := h.meta.RetrieveAttribute("", bucket, object, etagkey)
 	etag := string(b)
 	if err != nil {
 		etag = ""
@@ -3804,7 +3803,7 @@ func (h *HDFS) HeadObject(ctx context.Context, input *s3.HeadObjectInput) (*s3.H
 	var checksums s3response.Checksum
 	var cType types.ChecksumType
 	if input.ChecksumMode == types.ChecksumModeEnabled {
-		checksums, err = h.retrieveChecksums(nil, bucket, object)
+		checksums, err = h.retrieveChecksums("", bucket, object)
 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 			return nil, fmt.Errorf("get object checksums: %w", err)
 		}
@@ -3993,14 +3992,14 @@ func (h *HDFS) CopyObject(ctx context.Context, input s3response.CopyObjectInput)
 		}
 		// Store the new metadata
 		for k, v := range input.Metadata {
-			err := h.meta.StoreAttribute(nil, dstBucket, dstObject,
+			err := h.meta.StoreAttribute("", dstBucket, dstObject,
 				fmt.Sprintf("%v.%v", metaHdr, k), []byte(v))
 			if err != nil {
 				return s3response.CopyObjectOutput{}, fmt.Errorf("set user attr %q: %w", k, err)
 			}
 		}
 
-		checksums, err := h.retrieveChecksums(nil, dstBucket, dstObject)
+		checksums, err := h.retrieveChecksums("", dstBucket, dstObject)
 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 			return s3response.CopyObjectOutput{}, fmt.Errorf("get obj checksums: %w", err)
 		}
@@ -4052,24 +4051,23 @@ func (h *HDFS) CopyObject(ctx context.Context, input s3response.CopyObjectInput)
 				// should be FULL_OBJECT
 				chType = types.ChecksumTypeFullObject
 
-				// TODO nil because we are using sidecar
-				err = h.storeChecksums(nil, dstBucket, dstObject, checksums)
+				err = h.storeChecksums("", dstBucket, dstObject, checksums)
 				if err != nil {
 					return s3response.CopyObjectOutput{}, fmt.Errorf("store checksum: %w", err)
 				}
 			}
 		}
 
-		b, _ := h.meta.RetrieveAttribute(nil, dstBucket, dstObject, etagkey)
+		b, _ := h.meta.RetrieveAttribute("", dstBucket, dstObject, etagkey)
 		etag = string(b)
-		vId, _ := h.meta.RetrieveAttribute(nil, dstBucket, dstObject, versionIdKey)
+		vId, _ := h.meta.RetrieveAttribute("", dstBucket, dstObject, versionIdKey)
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 			return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
 		}
 		version = backend.GetPtrFromString(string(vId))
 
 		// Store the provided object meta properties
-		err = h.storeObjectMetadata(nil, dstBucket, dstObject,
+		err = h.storeObjectMetadata("", dstBucket, dstObject,
 			objectMetadata{
 				ContentType:        input.ContentType,
 				ContentEncoding:    input.ContentEncoding,
@@ -4096,7 +4094,7 @@ func (h *HDFS) CopyObject(ctx context.Context, input s3response.CopyObjectInput)
 	} else {
 		contentLength := fi.Size()
 
-		checksums, err := h.retrieveChecksums(f, srcBucket, srcObject)
+		checksums, err := h.retrieveChecksums("", srcBucket, srcObject)
 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 			return s3response.CopyObjectOutput{}, fmt.Errorf("get obj checksum: %w", err)
 		}
@@ -4150,12 +4148,12 @@ func (h *HDFS) CopyObject(ctx context.Context, input s3response.CopyObjectInput)
 		// copy the source object tagging after the destination object
 		// creation, if tagging directive is "COPY"
 		if input.TaggingDirective == types.TaggingDirectiveCopy {
-			tagging, err := h.meta.RetrieveAttribute(nil, srcBucket, srcObject, tagHdr)
+			tagging, err := h.meta.RetrieveAttribute("", srcBucket, srcObject, tagHdr)
 			if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 				return s3response.CopyObjectOutput{}, fmt.Errorf("get source object tagging: %w", err)
 			}
 			if err == nil {
-				err := h.meta.StoreAttribute(nil, dstBucket, dstObject, tagHdr, tagging)
+				err := h.meta.StoreAttribute("", dstBucket, dstObject, tagHdr, tagging)
 				if err != nil {
 					return s3response.CopyObjectOutput{}, fmt.Errorf("set destination object tagging: %w", err)
 				}
@@ -4249,7 +4247,7 @@ func (h *HDFS) fileToObj(bucket string, fetchOwner bool) GetObjFunc {
 		// Retreive the object owner data from bucket ACL, if fetchOwner is true
 		// All the objects in the bucket are owned by the bucket owner
 		if fetchOwner {
-			aclJSON, err := h.meta.RetrieveAttribute(nil, bucket, "", aclkey)
+			aclJSON, err := h.meta.RetrieveAttribute("", bucket, "", aclkey)
 			if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 				return s3response.Object{}, fmt.Errorf("get bucket acl: %w", err)
 			}
@@ -4266,7 +4264,7 @@ func (h *HDFS) fileToObj(bucket string, fetchOwner bool) GetObjFunc {
 		if info.IsDir() {
 			// directory object only happens if directory empty
 			// check to see if this is a directory object by checking etag
-			etagBytes, err := h.meta.RetrieveAttribute(nil, bucket, object, etagkey)
+			etagBytes, err := h.meta.RetrieveAttribute("", bucket, object, etagkey)
 			if errors.Is(err, meta.ErrNoSuchKey) || errors.Is(err, fs.ErrNotExist) {
 				return s3response.Object{}, backend.ErrSkipObj
 			}
@@ -4295,13 +4293,13 @@ func (h *HDFS) fileToObj(bucket string, fetchOwner bool) GetObjFunc {
 		}
 
 		// Retreive the object checksum algorithm
-		checksums, err := h.retrieveChecksums(nil, bucket, object)
+		checksums, err := h.retrieveChecksums("", bucket, object)
 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 			return s3response.Object{}, backend.ErrSkipObj
 		}
 
 		// file object, get object info and fill out object data
-		etagBytes, err := h.meta.RetrieveAttribute(nil, bucket, object, etagkey)
+		etagBytes, err := h.meta.RetrieveAttribute("", bucket, object, etagkey)
 		if errors.Is(err, fs.ErrNotExist) {
 			return s3response.Object{}, backend.ErrSkipObj
 		}
@@ -4400,7 +4398,7 @@ func (h *HDFS) PutBucketAcl(_ context.Context, bucket string, data []byte) error
 		return fmt.Errorf("stat bucket: %w", err)
 	}
 
-	err = h.meta.StoreAttribute(nil, bucket, "", aclkey, data)
+	err = h.meta.StoreAttribute("", bucket, "", aclkey, data)
 	if err != nil {
 		return fmt.Errorf("set acl: %w", err)
 	}
@@ -4420,7 +4418,7 @@ func (h *HDFS) GetBucketAcl(_ context.Context, input *s3.GetBucketAclInput) ([]b
 		return nil, fmt.Errorf("stat bucket: %w", err)
 	}
 
-	b, err := h.meta.RetrieveAttribute(nil, *input.Bucket, "", aclkey)
+	b, err := h.meta.RetrieveAttribute("", *input.Bucket, "", aclkey)
 	if errors.Is(err, meta.ErrNoSuchKey) {
 		return []byte{}, nil
 	}
@@ -4453,7 +4451,7 @@ func (h *HDFS) PutBucketTagging(_ context.Context, bucket string, tags map[strin
 		return fmt.Errorf("marshal tags: %w", err)
 	}
 
-	err = h.meta.StoreAttribute(nil, bucket, "", tagHdr, b)
+	err = h.meta.StoreAttribute("", bucket, "", tagHdr, b)
 	if err != nil {
 		return fmt.Errorf("set tags: %w", err)
 	}
@@ -4496,7 +4494,7 @@ func (h *HDFS) GetObjectTagging(_ context.Context, bucket, object string) (map[s
 
 func (h *HDFS) getAttrTags(bucket, object string) (map[string]string, error) {
 	tags := make(map[string]string)
-	b, err := h.meta.RetrieveAttribute(nil, bucket, object, tagHdr)
+	b, err := h.meta.RetrieveAttribute("", bucket, object, tagHdr)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		return nil, s3err.GetAPIError(s3err.ErrNoSuchKey)
 	}
@@ -4547,7 +4545,7 @@ func (h *HDFS) PutObjectTagging(_ context.Context, bucket, object string, tags m
 		return fmt.Errorf("marshal tags: %w", err)
 	}
 
-	err = h.meta.StoreAttribute(nil, bucket, object, tagHdr, b)
+	err = h.meta.StoreAttribute("", bucket, object, tagHdr, b)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		return s3err.GetAPIError(s3err.ErrNoSuchKey)
 	}
@@ -4584,7 +4582,7 @@ func (h *HDFS) PutBucketPolicy(ctx context.Context, bucket string, policy []byte
 		return nil
 	}
 
-	err = h.meta.StoreAttribute(nil, bucket, "", policykey, policy)
+	err = h.meta.StoreAttribute("", bucket, "", policykey, policy)
 	if err != nil {
 		return fmt.Errorf("set policy: %w", err)
 	}
@@ -4601,7 +4599,7 @@ func (h *HDFS) GetBucketPolicy(ctx context.Context, bucket string) ([]byte, erro
 		return nil, fmt.Errorf("stat bucket: %w", err)
 	}
 
-	policy, err := h.meta.RetrieveAttribute(nil, bucket, "", policykey)
+	policy, err := h.meta.RetrieveAttribute("", bucket, "", policykey)
 	if errors.Is(err, meta.ErrNoSuchKey) {
 		return nil, s3err.GetAPIError(s3err.ErrNoSuchBucketPolicy)
 	}
@@ -4620,7 +4618,7 @@ func (h *HDFS) DeleteBucketPolicy(ctx context.Context, bucket string) error {
 }
 
 func (h *HDFS) isBucketObjectLockEnabled(bucket string) error {
-	cfg, err := h.meta.RetrieveAttribute(nil, bucket, "", bucketLockKey)
+	cfg, err := h.meta.RetrieveAttribute("", bucket, "", bucketLockKey)
 	if errors.Is(err, fs.ErrNotExist) {
 		return s3err.GetAPIError(s3err.ErrNoSuchBucket)
 	}
@@ -4652,7 +4650,7 @@ func (h *HDFS) PutObjectLockConfiguration(ctx context.Context, bucket string, co
 		return fmt.Errorf("stat bucket: %w", err)
 	}
 
-	cfg, err := h.meta.RetrieveAttribute(nil, bucket, "", bucketLockKey)
+	cfg, err := h.meta.RetrieveAttribute("", bucket, "", bucketLockKey)
 	if errors.Is(err, meta.ErrNoSuchKey) {
 		return s3err.GetAPIError(s3err.ErrObjectLockConfigurationNotAllowed)
 	}
@@ -4669,7 +4667,7 @@ func (h *HDFS) PutObjectLockConfiguration(ctx context.Context, bucket string, co
 		return s3err.GetAPIError(s3err.ErrObjectLockConfigurationNotAllowed)
 	}
 
-	err = h.meta.StoreAttribute(nil, bucket, "", bucketLockKey, config)
+	err = h.meta.StoreAttribute("", bucket, "", bucketLockKey, config)
 	if err != nil {
 		return fmt.Errorf("set object lock config: %w", err)
 	}
@@ -4686,7 +4684,7 @@ func (h *HDFS) GetObjectLockConfiguration(_ context.Context, bucket string) ([]b
 		return nil, fmt.Errorf("stat bucket: %w", err)
 	}
 
-	cfg, err := h.meta.RetrieveAttribute(nil, bucket, "", bucketLockKey)
+	cfg, err := h.meta.RetrieveAttribute("", bucket, "", bucketLockKey)
 	if errors.Is(err, meta.ErrNoSuchKey) {
 		return nil, s3err.GetAPIError(s3err.ErrObjectLockConfigurationNotFound)
 	}
@@ -4735,7 +4733,7 @@ func (h *HDFS) PutObjectLegalHold(_ context.Context, bucket, object, versionId s
 	// 	}
 	// }
 
-	err = h.meta.StoreAttribute(nil, bucket, object, objectLegalHoldKey, statusData)
+	err = h.meta.StoreAttribute("", bucket, object, objectLegalHoldKey, statusData)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		if versionId != "" {
 			return s3err.GetAPIError(s3err.ErrInvalidVersionId)
@@ -4778,7 +4776,7 @@ func (h *HDFS) GetObjectLegalHold(_ context.Context, bucket, object, versionId s
 	// 	}
 	// }
 
-	data, err := h.meta.RetrieveAttribute(nil, bucket, object, objectLegalHoldKey)
+	data, err := h.meta.RetrieveAttribute("", bucket, object, objectLegalHoldKey)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		if versionId != "" {
 			return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
@@ -4828,7 +4826,7 @@ func (h *HDFS) PutObjectRetention(_ context.Context, bucket, object, versionId s
 	// 	}
 	// }
 
-	objectLockCfg, err := h.meta.RetrieveAttribute(nil, bucket, object, objectRetentionKey)
+	objectLockCfg, err := h.meta.RetrieveAttribute("", bucket, object, objectRetentionKey)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		if versionId != "" {
 			return s3err.GetAPIError(s3err.ErrInvalidVersionId)
@@ -4836,7 +4834,7 @@ func (h *HDFS) PutObjectRetention(_ context.Context, bucket, object, versionId s
 		return s3err.GetAPIError(s3err.ErrNoSuchKey)
 	}
 	if errors.Is(err, meta.ErrNoSuchKey) {
-		err := h.meta.StoreAttribute(nil, bucket, object, objectRetentionKey, retention)
+		err := h.meta.StoreAttribute("", bucket, object, objectRetentionKey, retention)
 		if err != nil {
 			return fmt.Errorf("set object lock config: %w", err)
 		}
@@ -4863,7 +4861,7 @@ func (h *HDFS) PutObjectRetention(_ context.Context, bucket, object, versionId s
 		}
 	}
 
-	err = h.meta.StoreAttribute(nil, bucket, object, objectRetentionKey, retention)
+	err = h.meta.StoreAttribute("", bucket, object, objectRetentionKey, retention)
 	if err != nil {
 		return fmt.Errorf("set object lock config: %w", err)
 	}
@@ -4900,7 +4898,7 @@ func (h *HDFS) GetObjectRetention(_ context.Context, bucket, object, versionId s
 	// 	}
 	// }
 
-	data, err := h.meta.RetrieveAttribute(nil, bucket, object, objectRetentionKey)
+	data, err := h.meta.RetrieveAttribute("", bucket, object, objectRetentionKey)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		if versionId != "" {
 			return nil, s3err.GetAPIError(s3err.ErrInvalidVersionId)
@@ -4947,7 +4945,8 @@ func (h *HDFS) ListBucketsAndOwners(ctx context.Context) (buckets []s3response.B
 	}
 
 	for _, fi := range fis {
-		aclJSON, err := h.meta.RetrieveAttribute(nil, fi.Name(), "", aclkey)
+		// This seems a bit like an abuse
+		aclJSON, err := h.meta.RetrieveAttribute("", fi.Name(), "", aclkey)
 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
 			return buckets, fmt.Errorf("get acl tag: %w", err)
 		}
@@ -4970,19 +4969,17 @@ func (h *HDFS) ListBucketsAndOwners(ctx context.Context) (buckets []s3response.B
 	return buckets, nil
 }
 
-func (h *HDFS) storeChecksums(_ *os.File, bucket, object string, chs s3response.Checksum) error {
+func (h *HDFS) storeChecksums(fullpath, bucket, object string, chs s3response.Checksum) error {
 	checksums, err := json.Marshal(chs)
 	if err != nil {
 		return fmt.Errorf("parse checksum: %w", err)
 	}
 
-	// TODO nil below because we are using the sidecar
-	return h.meta.StoreAttribute(nil, bucket, object, checksumsKey, checksums)
+	return h.meta.StoreAttribute(fullpath, bucket, object, checksumsKey, checksums)
 }
 
-func (h *HDFS) retrieveChecksums(_ *hdfs.FileReader, bucket, object string) (checksums s3response.Checksum, err error) {
-	// TODO nil now because we are using sidecar
-	checksumsAtr, err := h.meta.RetrieveAttribute(nil, bucket, object, checksumsKey)
+func (h *HDFS) retrieveChecksums(fullpath, bucket, object string) (checksums s3response.Checksum, err error) {
+	checksumsAtr, err := h.meta.RetrieveAttribute(fullpath, bucket, object, checksumsKey)
 	if err != nil {
 		return checksums, err
 	}

@@ -20,12 +20,12 @@ import (
 	"math"
 
 	"github.com/urfave/cli/v2"
-	"github.com/versity/versitygw/backend/meta"
 	"github.com/versity/versitygw/backend/hdfs"
+	"github.com/versity/versitygw/backend/hdfs/meta"
 )
 
 var (
-	nnaddress          string
+	nnaddress string
 )
 
 func hdfsCommand() *cli.Command {
@@ -113,8 +113,8 @@ func runHDFS(ctx *cli.Context) error {
 	}
 
 	opts := hdfs.HDFSOpts{
-		ChownUID:       chownuid,
-		ChownGID:       chowngid,
+		ChownUID: chownuid,
+		ChownGID: chowngid,
 		// VersioningDir:  versioningDir,
 		NewDirPerm:     fs.FileMode(dirPerms),
 		ForceNoTmpFile: forceNoTmpFile,
@@ -131,13 +131,6 @@ func runHDFS(ctx *cli.Context) error {
 		opts.SideCarDir = sidecar
 	case nometa:
 		ms = meta.NoMeta{}
-	default:
-		return fmt.Errorf("xattr not supported yet please use sidecar")
-		// ms = meta.XattrMeta{}
-		// err := meta.XattrMeta{}.Test(gwroot)
-		// if err != nil {
-		// 	return fmt.Errorf("xattr check failed: %w", err)
-		// }
 	}
 
 	be, err := hdfs.New(nnaddress, gwroot, ms, opts)
