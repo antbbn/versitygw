@@ -2452,219 +2452,224 @@ func (h *HDFS) UploadPart(ctx context.Context, input *s3.UploadPartInput) (*s3.U
 	return res, nil
 }
 
-// func (p *Posix) UploadPartCopy(ctx context.Context, upi *s3.UploadPartCopyInput) (s3response.CopyPartResult, error) {
-// 	acct, ok := ctx.Value("account").(auth.Account)
-// 	if !ok {
-// 		acct = auth.Account{}
-// 	}
+func (h *HDFS) UploadPartCopy(ctx context.Context, upi *s3.UploadPartCopyInput) (s3response.CopyPartResult, error) {
+	// TODO Figure out permissions
+	// acct, ok := ctx.Value("account").(auth.Account)
+	// if !ok {
+	// 	acct = auth.Account{}
+	// }
 
-// 	if upi.Bucket == nil {
-// 		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrInvalidBucketName)
-// 	}
-// 	if upi.Key == nil {
-// 		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
+	if upi.Bucket == nil {
+		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrInvalidBucketName)
+	}
+	if upi.Key == nil {
+		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
 
-// 	_, err := os.Stat(*upi.Bucket)
-// 	if errors.Is(err, fs.ErrNotExist) {
-// 		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchBucket)
-// 	}
-// 	if err != nil {
-// 		return s3response.CopyPartResult{}, fmt.Errorf("stat bucket: %w", err)
-// 	}
+	_, err := h.client.Stat(filepath.Join(h.rootdir, *upi.Bucket))
+	if errors.Is(err, fs.ErrNotExist) {
+		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchBucket)
+	}
+	if err != nil {
+		return s3response.CopyPartResult{}, fmt.Errorf("stat bucket: %w", err)
+	}
 
-// 	sum := sha256.Sum256([]byte(*upi.Key))
-// 	objdir := filepath.Join(metaTmpMultipartDir, fmt.Sprintf("%x", sum))
+	sum := sha256.Sum256([]byte(*upi.Key))
+	objdir := filepath.Join(metaTmpMultipartDir, fmt.Sprintf("%x", sum))
 
-// 	_, err = os.Stat(filepath.Join(*upi.Bucket, objdir, *upi.UploadId))
-// 	if errors.Is(err, fs.ErrNotExist) {
-// 		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchUpload)
-// 	}
-// 	if errors.Is(err, syscall.ENAMETOOLONG) {
-// 		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrKeyTooLong)
-// 	}
-// 	if err != nil {
-// 		return s3response.CopyPartResult{}, fmt.Errorf("stat uploadid: %w", err)
-// 	}
+	_, err = h.client.Stat(filepath.Join(h.rootdir, *upi.Bucket, objdir, *upi.UploadId))
+	if errors.Is(err, fs.ErrNotExist) {
+		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchUpload)
+	}
+	if errors.Is(err, syscall.ENAMETOOLONG) {
+		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrKeyTooLong)
+	}
+	if err != nil {
+		return s3response.CopyPartResult{}, fmt.Errorf("stat uploadid: %w", err)
+	}
 
-// 	partPath := filepath.Join(objdir, *upi.UploadId, fmt.Sprintf("%v", *upi.PartNumber))
+	partPath := filepath.Join(objdir, *upi.UploadId, fmt.Sprintf("%v", *upi.PartNumber))
 
-// 	srcBucket, srcObject, srcVersionId, err := backend.ParseCopySource(*upi.CopySource)
-// 	if err != nil {
-// 		return s3response.CopyPartResult{}, err
-// 	}
+	srcBucket, srcObject, srcVersionId, err := backend.ParseCopySource(*upi.CopySource)
+	if err != nil {
+		return s3response.CopyPartResult{}, err
+	}
 
-// 	_, err = os.Stat(srcBucket)
-// 	if errors.Is(err, fs.ErrNotExist) {
-// 		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchBucket)
-// 	}
-// 	if err != nil {
-// 		return s3response.CopyPartResult{}, fmt.Errorf("stat bucket: %w", err)
-// 	}
+	_, err = h.client.Stat(filepath.Join(h.rootdir, srcBucket))
+	if errors.Is(err, fs.ErrNotExist) {
+		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchBucket)
+	}
+	if err != nil {
+		return s3response.CopyPartResult{}, fmt.Errorf("stat bucket: %w", err)
+	}
 
-// 	vStatus, err := p.getBucketVersioningStatus(ctx, srcBucket)
-// 	if err != nil {
-// 		return s3response.CopyPartResult{}, err
-// 	}
-// 	vEnabled := p.isBucketVersioningEnabled(vStatus)
+	vStatus, err := h.getBucketVersioningStatus(ctx, srcBucket)
+	if err != nil {
+		return s3response.CopyPartResult{}, err
+	}
+	vEnabled := h.isBucketVersioningEnabled(vStatus)
 
-// 	if srcVersionId != "" {
-// 		if !p.versioningEnabled() || !vEnabled {
-// 			return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrInvalidVersionId)
-// 		}
-// 		vId, err := p.meta.RetrieveAttribute(nil, srcBucket, srcObject, versionIdKey)
-// 		if errors.Is(err, fs.ErrNotExist) {
-// 			return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 		}
-// 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 			return s3response.CopyPartResult{}, fmt.Errorf("get src object version id: %w", err)
-// 		}
+	if srcVersionId != "" {
+		// if !p.versioningEnabled() || !vEnabled {
+		// 	return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrInvalidVersionId)
+		// }
+		// vId, err := p.meta.RetrieveAttribute(nil, srcBucket, srcObject, versionIdKey)
+		// if errors.Is(err, fs.ErrNotExist) {
+		// 	return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
+		// }
+		// if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+		// 	return s3response.CopyPartResult{}, fmt.Errorf("get src object version id: %w", err)
+		// }
 
-// 		if string(vId) != srcVersionId {
-// 			srcBucket = filepath.Join(p.versioningDir, srcBucket)
-// 			srcObject = filepath.Join(genObjVersionKey(srcObject), srcVersionId)
-// 		}
-// 	}
+		// if string(vId) != srcVersionId {
+		// 	srcBucket = filepath.Join(p.versioningDir, srcBucket)
+		// 	srcObject = filepath.Join(genObjVersionKey(srcObject), srcVersionId)
+		// }
+	}
 
-// 	objPath := filepath.Join(srcBucket, srcObject)
-// 	fi, err := os.Stat(objPath)
-// 	if errors.Is(err, fs.ErrNotExist) {
-// 		if p.versioningEnabled() && vEnabled {
-// 			return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchVersion)
-// 		}
-// 		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	if errors.Is(err, syscall.ENAMETOOLONG) {
-// 		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrKeyTooLong)
-// 	}
-// 	if err != nil {
-// 		return s3response.CopyPartResult{}, fmt.Errorf("stat object: %w", err)
-// 	}
+	objPath := filepath.Join(h.rootdir, srcBucket, srcObject)
+	fi, err := h.client.Stat(objPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		if h.versioningEnabled() && vEnabled {
+			return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchVersion)
+		}
+		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	if errors.Is(err, syscall.ENAMETOOLONG) {
+		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrKeyTooLong)
+	}
+	if err != nil {
+		return s3response.CopyPartResult{}, fmt.Errorf("stat object: %w", err)
+	}
 
-// 	startOffset, length, err := backend.ParseCopySourceRange(fi.Size(), *upi.CopySourceRange)
-// 	if err != nil {
-// 		return s3response.CopyPartResult{}, err
-// 	}
+	startOffset, length, err := backend.ParseCopySourceRange(fi.Size(), *upi.CopySourceRange)
+	if err != nil {
+		return s3response.CopyPartResult{}, err
+	}
 
-// 	f, err := p.openTmpFile(filepath.Join(*upi.Bucket, objdir),
-// 		*upi.Bucket, partPath, length, acct, doFalloc, p.forceNoTmpFile)
-// 	if err != nil {
-// 		if errors.Is(err, syscall.EDQUOT) {
-// 			return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrQuotaExceeded)
-// 		}
-// 		return s3response.CopyPartResult{}, fmt.Errorf("open temp file: %w", err)
-// 	}
-// 	defer f.cleanup()
+	// f, err := p.openTmpFile(filepath.Join(*upi.Bucket, objdir),
+	// 	*upi.Bucket, partPath, length, acct, doFalloc, p.forceNoTmpFile)
+	f, err := h.openTmpFile(*upi.Bucket, length)
+	if err != nil {
+		if errors.Is(err, syscall.EDQUOT) {
+			return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrQuotaExceeded)
+		}
+		return s3response.CopyPartResult{}, fmt.Errorf("open temp file: %w", err)
+	}
+	defer f.cleanup()
 
-// 	srcf, err := os.Open(objPath)
-// 	if errors.Is(err, fs.ErrNotExist) {
-// 		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	if err != nil {
-// 		return s3response.CopyPartResult{}, fmt.Errorf("open object: %w", err)
-// 	}
-// 	defer srcf.Close()
+	srcf, err := h.client.Open(objPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	if err != nil {
+		return s3response.CopyPartResult{}, fmt.Errorf("open object: %w", err)
+	}
+	defer srcf.Close()
 
-// 	rdr := io.NewSectionReader(srcf, startOffset, length)
-// 	hash := md5.New()
-// 	tr := io.TeeReader(rdr, hash)
+	rdr := io.NewSectionReader(srcf, startOffset, length)
+	hash := md5.New()
+	tr := io.TeeReader(rdr, hash)
 
-// 	mpChecksums, err := p.retrieveChecksums(nil, *upi.Bucket, filepath.Join(objdir, *upi.UploadId))
-// 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 		return s3response.CopyPartResult{}, fmt.Errorf("retreive mp checksums: %w", err)
-// 	}
+	mpChecksums, err := h.retrieveChecksums(nil, *upi.Bucket, filepath.Join(objdir, *upi.UploadId))
+	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+		return s3response.CopyPartResult{}, fmt.Errorf("retreive mp checksums: %w", err)
+	}
 
-// 	checksums, err := p.retrieveChecksums(nil, objPath, "")
-// 	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 		return s3response.CopyPartResult{}, fmt.Errorf("retreive object part checksums: %w", err)
-// 	}
+	checksums, err := h.retrieveChecksums(nil, objPath, "")
+	if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+		return s3response.CopyPartResult{}, fmt.Errorf("retreive object part checksums: %w", err)
+	}
 
-// 	// TODO: Should the checksum be recalculated or just copied ?
-// 	var hashRdr *utils.HashReader
-// 	if mpChecksums.Algorithm != "" {
-// 		if checksums.Algorithm == "" || mpChecksums.Algorithm != checksums.Algorithm {
-// 			hashRdr, err = utils.NewHashReader(tr, "", utils.HashType(strings.ToLower(string(mpChecksums.Algorithm))))
-// 			if err != nil {
-// 				return s3response.CopyPartResult{}, fmt.Errorf("initialize hash reader: %w", err)
-// 			}
+	// TODO: Should the checksum be recalculated or just copied ?
+	var hashRdr *utils.HashReader
+	if mpChecksums.Algorithm != "" {
+		if checksums.Algorithm == "" || mpChecksums.Algorithm != checksums.Algorithm {
+			hashRdr, err = utils.NewHashReader(tr, "", utils.HashType(strings.ToLower(string(mpChecksums.Algorithm))))
+			if err != nil {
+				return s3response.CopyPartResult{}, fmt.Errorf("initialize hash reader: %w", err)
+			}
 
-// 			tr = hashRdr
-// 		}
-// 	}
+			tr = hashRdr
+		}
+	}
 
-// 	_, err = io.Copy(f, tr)
-// 	if err != nil {
-// 		if errors.Is(err, syscall.EDQUOT) {
-// 			return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrQuotaExceeded)
-// 		}
-// 		return s3response.CopyPartResult{}, fmt.Errorf("copy part data: %w", err)
-// 	}
+	_, err = io.Copy(f, tr)
+	if err != nil {
+		if errors.Is(err, syscall.EDQUOT) {
+			return s3response.CopyPartResult{}, s3err.GetAPIError(s3err.ErrQuotaExceeded)
+		}
+		return s3response.CopyPartResult{}, fmt.Errorf("copy part data: %w", err)
+	}
 
-// 	if checksums.Algorithm != "" {
-// 		if mpChecksums.Algorithm == "" {
-// 			checksums = s3response.Checksum{}
-// 		} else {
-// 			if hashRdr == nil {
-// 				err := p.storeChecksums(f.File(), objPath, "", checksums)
-// 				if err != nil {
-// 					return s3response.CopyPartResult{}, fmt.Errorf("store part checksum: %w", err)
-// 				}
-// 			}
-// 		}
-// 	}
-// 	if hashRdr != nil {
-// 		algo := types.ChecksumAlgorithm(strings.ToUpper(string(hashRdr.Type())))
-// 		checksums = s3response.Checksum{
-// 			Algorithm: algo,
-// 		}
+	if checksums.Algorithm != "" {
+		if mpChecksums.Algorithm == "" {
+			checksums = s3response.Checksum{}
+		} else {
+			if hashRdr == nil {
+				// TODO nil because we are using sidecar
+				err := h.storeChecksums(nil, objPath, "", checksums)
+				if err != nil {
+					return s3response.CopyPartResult{}, fmt.Errorf("store part checksum: %w", err)
+				}
+			}
+		}
+	}
+	if hashRdr != nil {
+		algo := types.ChecksumAlgorithm(strings.ToUpper(string(hashRdr.Type())))
+		checksums = s3response.Checksum{
+			Algorithm: algo,
+		}
 
-// 		sum := hashRdr.Sum()
-// 		switch algo {
-// 		case types.ChecksumAlgorithmCrc32:
-// 			checksums.CRC32 = &sum
-// 		case types.ChecksumAlgorithmCrc32c:
-// 			checksums.CRC32C = &sum
-// 		case types.ChecksumAlgorithmSha1:
-// 			checksums.SHA1 = &sum
-// 		case types.ChecksumAlgorithmSha256:
-// 			checksums.SHA256 = &sum
-// 		case types.ChecksumAlgorithmCrc64nvme:
-// 			checksums.CRC64NVME = &sum
-// 		}
+		sum := hashRdr.Sum()
+		switch algo {
+		case types.ChecksumAlgorithmCrc32:
+			checksums.CRC32 = &sum
+		case types.ChecksumAlgorithmCrc32c:
+			checksums.CRC32C = &sum
+		case types.ChecksumAlgorithmSha1:
+			checksums.SHA1 = &sum
+		case types.ChecksumAlgorithmSha256:
+			checksums.SHA256 = &sum
+		case types.ChecksumAlgorithmCrc64nvme:
+			checksums.CRC64NVME = &sum
+		}
 
-// 		err := p.storeChecksums(f.File(), objPath, "", checksums)
-// 		if err != nil {
-// 			return s3response.CopyPartResult{}, fmt.Errorf("store part checksum: %w", err)
-// 		}
-// 	}
+		// TODO nil because we are using sidecar
+		err := h.storeChecksums(nil, objPath, "", checksums)
+		if err != nil {
+			return s3response.CopyPartResult{}, fmt.Errorf("store part checksum: %w", err)
+		}
+	}
 
-// 	etag := backend.GenerateEtag(hash)
-// 	err = p.meta.StoreAttribute(f.File(), *upi.Bucket, partPath, etagkey, []byte(etag))
-// 	if err != nil {
-// 		return s3response.CopyPartResult{}, fmt.Errorf("set etag attr: %w", err)
-// 	}
+	etag := backend.GenerateEtag(hash)
+	// TODO nil because we are using sidecar
+	err = h.meta.StoreAttribute(nil, *upi.Bucket, partPath, etagkey, []byte(etag))
+	if err != nil {
+		return s3response.CopyPartResult{}, fmt.Errorf("set etag attr: %w", err)
+	}
 
-// 	err = f.link()
-// 	if err != nil {
-// 		return s3response.CopyPartResult{}, fmt.Errorf("link object in namespace: %w", err)
-// 	}
+	err = h.finalizeTmpFile(f, filepath.Join(h.rootdir, *upi.Bucket, partPath))
+	if err != nil {
+		return s3response.CopyPartResult{}, fmt.Errorf("link object in namespace: %w", err)
+	}
 
-// 	fi, err = os.Stat(filepath.Join(*upi.Bucket, partPath))
-// 	if err != nil {
-// 		return s3response.CopyPartResult{}, fmt.Errorf("stat part path: %w", err)
-// 	}
+	fi, err = h.client.Stat(filepath.Join(h.rootdir, *upi.Bucket, partPath))
+	if err != nil {
+		return s3response.CopyPartResult{}, fmt.Errorf("stat part path: %w", err)
+	}
 
-// 	return s3response.CopyPartResult{
-// 		ETag:                &etag,
-// 		LastModified:        fi.ModTime(),
-// 		CopySourceVersionId: srcVersionId,
-// 		ChecksumCRC32:       checksums.CRC32,
-// 		ChecksumCRC32C:      checksums.CRC32C,
-// 		ChecksumSHA1:        checksums.SHA1,
-// 		ChecksumSHA256:      checksums.SHA256,
-// 		ChecksumCRC64NVME:   checksums.CRC64NVME,
-// 	}, nil
-// }
+	return s3response.CopyPartResult{
+		ETag:                &etag,
+		LastModified:        fi.ModTime(),
+		CopySourceVersionId: srcVersionId,
+		ChecksumCRC32:       checksums.CRC32,
+		ChecksumCRC32C:      checksums.CRC32C,
+		ChecksumSHA1:        checksums.SHA1,
+		ChecksumSHA256:      checksums.SHA256,
+		ChecksumCRC64NVME:   checksums.CRC64NVME,
+	}, nil
+}
 
 func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3response.PutObjectOutput, error) {
 	// TODO fix perms
@@ -3618,7 +3623,6 @@ func (h *HDFS) HeadObject(ctx context.Context, input *s3.HeadObjectInput) (*s3.H
 	bucket := *input.Bucket
 	object := *input.Key
 
-	// TODO when multipart is implemented
 	if input.PartNumber != nil {
 		uploadId, sum, err := h.retrieveUploadId(bucket, object)
 		if err != nil {
@@ -3872,320 +3876,322 @@ func (h *HDFS) GetObjectAttributes(ctx context.Context, input *s3.GetObjectAttri
 	}, nil
 }
 
-// func (p *Posix) CopyObject(ctx context.Context, input s3response.CopyObjectInput) (s3response.CopyObjectOutput, error) {
-// 	if input.Bucket == nil {
-// 		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrInvalidBucketName)
-// 	}
-// 	if input.Key == nil {
-// 		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrInvalidCopyDest)
-// 	}
-// 	if input.CopySource == nil {
-// 		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrInvalidCopySource)
-// 	}
-// 	if input.ExpectedBucketOwner == nil {
-// 		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrInvalidRequest)
-// 	}
+// TODO not particulary optimized for HDFS just Open()s the remote file and passes it to PutObject.
+func (h *HDFS) CopyObject(ctx context.Context, input s3response.CopyObjectInput) (s3response.CopyObjectOutput, error) {
+	if input.Bucket == nil {
+		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrInvalidBucketName)
+	}
+	if input.Key == nil {
+		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrInvalidCopyDest)
+	}
+	if input.CopySource == nil {
+		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrInvalidCopySource)
+	}
+	if input.ExpectedBucketOwner == nil {
+		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrInvalidRequest)
+	}
 
-// 	srcBucket, srcObject, srcVersionId, err := backend.ParseCopySource(*input.CopySource)
-// 	if err != nil {
-// 		return s3response.CopyObjectOutput{}, err
-// 	}
-// 	dstBucket := *input.Bucket
-// 	dstObject := *input.Key
+	srcBucket, srcObject, srcVersionId, err := backend.ParseCopySource(*input.CopySource)
+	if err != nil {
+		return s3response.CopyObjectOutput{}, err
+	}
+	dstBucket := *input.Bucket
+	dstObject := *input.Key
 
-// 	_, err = os.Stat(srcBucket)
-// 	if errors.Is(err, fs.ErrNotExist) {
-// 		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchBucket)
-// 	}
-// 	if err != nil {
-// 		return s3response.CopyObjectOutput{}, fmt.Errorf("stat bucket: %w", err)
-// 	}
+	_, err = h.client.Stat(filepath.Join(h.rootdir, srcBucket))
+	if errors.Is(err, fs.ErrNotExist) {
+		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchBucket)
+	}
+	if err != nil {
+		return s3response.CopyObjectOutput{}, fmt.Errorf("stat bucket: %w", err)
+	}
 
-// 	vStatus, err := p.getBucketVersioningStatus(ctx, srcBucket)
-// 	if err != nil {
-// 		return s3response.CopyObjectOutput{}, err
-// 	}
-// 	vEnabled := p.isBucketVersioningEnabled(vStatus)
+	vStatus, err := h.getBucketVersioningStatus(ctx, srcBucket)
+	if err != nil {
+		return s3response.CopyObjectOutput{}, err
+	}
+	vEnabled := h.isBucketVersioningEnabled(vStatus)
 
-// 	if srcVersionId != "" {
-// 		if !p.versioningEnabled() || !vEnabled {
-// 			return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrInvalidVersionId)
-// 		}
-// 		vId, err := p.meta.RetrieveAttribute(nil, srcBucket, srcObject, versionIdKey)
-// 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-// 			return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 		}
-// 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 			return s3response.CopyObjectOutput{}, fmt.Errorf("get src object version id: %w", err)
-// 		}
+	if srcVersionId != "" {
+		// if !p.versioningEnabled() || !vEnabled {
+		// 	return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrInvalidVersionId)
+		// }
+		// vId, err := p.meta.RetrieveAttribute(nil, srcBucket, srcObject, versionIdKey)
+		// if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		// 	return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
+		// }
+		// if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+		// 	return s3response.CopyObjectOutput{}, fmt.Errorf("get src object version id: %w", err)
+		// }
 
-// 		if string(vId) != srcVersionId {
-// 			srcBucket = joinPathWithTrailer(p.versioningDir, srcBucket)
-// 			srcObject = joinPathWithTrailer(genObjVersionKey(srcObject), srcVersionId)
-// 		}
-// 	}
+		// if string(vId) != srcVersionId {
+		// 	srcBucket = joinPathWithTrailer(p.versioningDir, srcBucket)
+		// 	srcObject = joinPathWithTrailer(genObjVersionKey(srcObject), srcVersionId)
+		// }
+	}
 
-// 	_, err = os.Stat(dstBucket)
-// 	if errors.Is(err, fs.ErrNotExist) {
-// 		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchBucket)
-// 	}
-// 	if err != nil {
-// 		return s3response.CopyObjectOutput{}, fmt.Errorf("stat bucket: %w", err)
-// 	}
+	_, err = h.client.Stat(filepath.Join(h.rootdir, dstBucket))
+	if errors.Is(err, fs.ErrNotExist) {
+		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchBucket)
+	}
+	if err != nil {
+		return s3response.CopyObjectOutput{}, fmt.Errorf("stat bucket: %w", err)
+	}
 
-// 	objPath := joinPathWithTrailer(srcBucket, srcObject)
-// 	f, err := os.Open(objPath)
-// 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-// 		if p.versioningEnabled() && vEnabled {
-// 			return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchVersion)
-// 		}
-// 		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	if errors.Is(err, syscall.ENAMETOOLONG) {
-// 		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrKeyTooLong)
-// 	}
-// 	if err != nil {
-// 		return s3response.CopyObjectOutput{}, fmt.Errorf("open object: %w", err)
-// 	}
-// 	defer f.Close()
+	objPath := joinPathWithTrailer(h.rootdir, srcBucket, srcObject)
+	f, err := h.client.Open(objPath)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		if h.versioningEnabled() && vEnabled {
+			return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchVersion)
+		}
+		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	if errors.Is(err, syscall.ENAMETOOLONG) {
+		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrKeyTooLong)
+	}
+	if err != nil {
+		return s3response.CopyObjectOutput{}, fmt.Errorf("open object: %w", err)
+	}
+	defer f.Close()
 
-// 	fi, err := f.Stat()
-// 	if err != nil {
-// 		return s3response.CopyObjectOutput{}, fmt.Errorf("stat object: %w", err)
-// 	}
-// 	if strings.HasSuffix(srcObject, "/") && !fi.IsDir() {
-// 		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
-// 	if !strings.HasSuffix(srcObject, "/") && fi.IsDir() {
-// 		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 	}
+	fi, err := h.client.Stat(objPath)
+	if err != nil {
+		return s3response.CopyObjectOutput{}, fmt.Errorf("stat object: %w", err)
+	}
+	if strings.HasSuffix(srcObject, "/") && !fi.IsDir() {
+		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
+	if !strings.HasSuffix(srcObject, "/") && fi.IsDir() {
+		return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
+	}
 
-// 	mdmap := make(map[string]string)
-// 	p.loadObjectMetaData(srcBucket, srcObject, &fi, mdmap)
+	mdmap := make(map[string]string)
+	h.loadObjectMetaData(srcBucket, srcObject, &fi, mdmap)
 
-// 	var etag string
-// 	var version *string
-// 	var crc32 *string
-// 	var crc32c *string
-// 	var sha1 *string
-// 	var sha256 *string
-// 	var crc64nvme *string
-// 	var chType types.ChecksumType
+	var etag string
+	var version *string
+	var crc32 *string
+	var crc32c *string
+	var sha1 *string
+	var sha256 *string
+	var crc64nvme *string
+	var chType types.ChecksumType
 
-// 	dstObjdPath := joinPathWithTrailer(dstBucket, dstObject)
-// 	if dstObjdPath == objPath {
-// 		if input.MetadataDirective == types.MetadataDirectiveCopy {
-// 			return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrInvalidCopyDest)
-// 		}
+	dstObjdPath := joinPathWithTrailer(h.rootdir, dstBucket, dstObject)
+	if dstObjdPath == objPath {
+		if input.MetadataDirective == types.MetadataDirectiveCopy {
+			return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrInvalidCopyDest)
+		}
 
-// 		// Delete the object metadata
-// 		for k := range mdmap {
-// 			err := p.meta.DeleteAttribute(dstBucket, dstObject,
-// 				fmt.Sprintf("%v.%v", metaHdr, k))
-// 			if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 				return s3response.CopyObjectOutput{}, fmt.Errorf("delete user metadata: %w", err)
-// 			}
-// 		}
-// 		// Store the new metadata
-// 		for k, v := range input.Metadata {
-// 			err := p.meta.StoreAttribute(nil, dstBucket, dstObject,
-// 				fmt.Sprintf("%v.%v", metaHdr, k), []byte(v))
-// 			if err != nil {
-// 				return s3response.CopyObjectOutput{}, fmt.Errorf("set user attr %q: %w", k, err)
-// 			}
-// 		}
+		// Delete the object metadata
+		for k := range mdmap {
+			err := h.meta.DeleteAttribute(dstBucket, dstObject,
+				fmt.Sprintf("%v.%v", metaHdr, k))
+			if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+				return s3response.CopyObjectOutput{}, fmt.Errorf("delete user metadata: %w", err)
+			}
+		}
+		// Store the new metadata
+		for k, v := range input.Metadata {
+			err := h.meta.StoreAttribute(nil, dstBucket, dstObject,
+				fmt.Sprintf("%v.%v", metaHdr, k), []byte(v))
+			if err != nil {
+				return s3response.CopyObjectOutput{}, fmt.Errorf("set user attr %q: %w", k, err)
+			}
+		}
 
-// 		checksums, err := p.retrieveChecksums(nil, dstBucket, dstObject)
-// 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 			return s3response.CopyObjectOutput{}, fmt.Errorf("get obj checksums: %w", err)
-// 		}
+		checksums, err := h.retrieveChecksums(nil, dstBucket, dstObject)
+		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+			return s3response.CopyObjectOutput{}, fmt.Errorf("get obj checksums: %w", err)
+		}
 
-// 		chType = checksums.Type
+		chType = checksums.Type
 
-// 		if input.ChecksumAlgorithm != "" {
-// 			// If a different checksum algorith is specified
-// 			// first caclculate and store the checksum
-// 			if checksums.Algorithm != input.ChecksumAlgorithm {
-// 				f, err := os.Open(dstObjdPath)
-// 				if err != nil {
-// 					return s3response.CopyObjectOutput{}, fmt.Errorf("open obj file: %w", err)
-// 				}
-// 				defer f.Close()
+		if input.ChecksumAlgorithm != "" {
+			// If a different checksum algorith is specified
+			// first caclculate and store the checksum
+			if checksums.Algorithm != input.ChecksumAlgorithm {
+				f, err := h.client.Open(dstObjdPath)
+				if err != nil {
+					return s3response.CopyObjectOutput{}, fmt.Errorf("open obj file: %w", err)
+				}
+				defer f.Close()
 
-// 				hashReader, err := utils.NewHashReader(f, "", utils.HashType(strings.ToLower(string(input.ChecksumAlgorithm))))
-// 				if err != nil {
-// 					return s3response.CopyObjectOutput{}, fmt.Errorf("initialize hash reader: %w", err)
-// 				}
+				hashReader, err := utils.NewHashReader(f, "", utils.HashType(strings.ToLower(string(input.ChecksumAlgorithm))))
+				if err != nil {
+					return s3response.CopyObjectOutput{}, fmt.Errorf("initialize hash reader: %w", err)
+				}
 
-// 				_, err = hashReader.Read(nil)
-// 				if err != nil {
-// 					return s3response.CopyObjectOutput{}, fmt.Errorf("read err: %w", err)
-// 				}
+				_, err = hashReader.Read(nil)
+				if err != nil {
+					return s3response.CopyObjectOutput{}, fmt.Errorf("read err: %w", err)
+				}
 
-// 				checksums = s3response.Checksum{}
+				checksums = s3response.Checksum{}
 
-// 				sum := hashReader.Sum()
-// 				switch hashReader.Type() {
-// 				case utils.HashTypeCRC32:
-// 					checksums.CRC32 = &sum
-// 					crc32 = &sum
-// 				case utils.HashTypeCRC32C:
-// 					checksums.CRC32C = &sum
-// 					crc32c = &sum
-// 				case utils.HashTypeSha1:
-// 					checksums.SHA1 = &sum
-// 					sha1 = &sum
-// 				case utils.HashTypeSha256:
-// 					checksums.SHA256 = &sum
-// 					sha256 = &sum
-// 				case utils.HashTypeCRC64NVME:
-// 					checksums.CRC64NVME = &sum
-// 					crc64nvme = &sum
-// 				}
+				sum := hashReader.Sum()
+				switch hashReader.Type() {
+				case utils.HashTypeCRC32:
+					checksums.CRC32 = &sum
+					crc32 = &sum
+				case utils.HashTypeCRC32C:
+					checksums.CRC32C = &sum
+					crc32c = &sum
+				case utils.HashTypeSha1:
+					checksums.SHA1 = &sum
+					sha1 = &sum
+				case utils.HashTypeSha256:
+					checksums.SHA256 = &sum
+					sha256 = &sum
+				case utils.HashTypeCRC64NVME:
+					checksums.CRC64NVME = &sum
+					crc64nvme = &sum
+				}
 
-// 				// If a new checksum is calculated, the checksum type
-// 				// should be FULL_OBJECT
-// 				chType = types.ChecksumTypeFullObject
+				// If a new checksum is calculated, the checksum type
+				// should be FULL_OBJECT
+				chType = types.ChecksumTypeFullObject
 
-// 				err = p.storeChecksums(f, dstBucket, dstObject, checksums)
-// 				if err != nil {
-// 					return s3response.CopyObjectOutput{}, fmt.Errorf("store checksum: %w", err)
-// 				}
-// 			}
-// 		}
+				// TODO nil because we are using sidecar
+				err = h.storeChecksums(nil, dstBucket, dstObject, checksums)
+				if err != nil {
+					return s3response.CopyObjectOutput{}, fmt.Errorf("store checksum: %w", err)
+				}
+			}
+		}
 
-// 		b, _ := p.meta.RetrieveAttribute(nil, dstBucket, dstObject, etagkey)
-// 		etag = string(b)
-// 		vId, _ := p.meta.RetrieveAttribute(nil, dstBucket, dstObject, versionIdKey)
-// 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-// 			return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
-// 		}
-// 		version = backend.GetPtrFromString(string(vId))
+		b, _ := h.meta.RetrieveAttribute(nil, dstBucket, dstObject, etagkey)
+		etag = string(b)
+		vId, _ := h.meta.RetrieveAttribute(nil, dstBucket, dstObject, versionIdKey)
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			return s3response.CopyObjectOutput{}, s3err.GetAPIError(s3err.ErrNoSuchKey)
+		}
+		version = backend.GetPtrFromString(string(vId))
 
-// 		// Store the provided object meta properties
-// 		err = p.storeObjectMetadata(nil, dstBucket, dstObject,
-// 			objectMetadata{
-// 				ContentType:        input.ContentType,
-// 				ContentEncoding:    input.ContentEncoding,
-// 				ContentLanguage:    input.ContentLanguage,
-// 				ContentDisposition: input.ContentDisposition,
-// 				CacheControl:       input.CacheControl,
-// 				Expires:            input.Expires,
-// 			})
-// 		if err != nil {
-// 			return s3response.CopyObjectOutput{}, err
-// 		}
+		// Store the provided object meta properties
+		err = h.storeObjectMetadata(nil, dstBucket, dstObject,
+			objectMetadata{
+				ContentType:        input.ContentType,
+				ContentEncoding:    input.ContentEncoding,
+				ContentLanguage:    input.ContentLanguage,
+				ContentDisposition: input.ContentDisposition,
+				CacheControl:       input.CacheControl,
+				Expires:            input.Expires,
+			})
+		if err != nil {
+			return s3response.CopyObjectOutput{}, err
+		}
 
-// 		if input.TaggingDirective == types.TaggingDirectiveReplace {
-// 			tags, err := backend.ParseObjectTags(getString(input.Tagging))
-// 			if err != nil {
-// 				return s3response.CopyObjectOutput{}, err
-// 			}
+		if input.TaggingDirective == types.TaggingDirectiveReplace {
+			tags, err := backend.ParseObjectTags(getString(input.Tagging))
+			if err != nil {
+				return s3response.CopyObjectOutput{}, err
+			}
 
-// 			err = p.PutObjectTagging(ctx, dstBucket, dstObject, tags)
-// 			if err != nil {
-// 				return s3response.CopyObjectOutput{}, err
-// 			}
-// 		}
-// 	} else {
-// 		contentLength := fi.Size()
+			err = h.PutObjectTagging(ctx, dstBucket, dstObject, tags)
+			if err != nil {
+				return s3response.CopyObjectOutput{}, err
+			}
+		}
+	} else {
+		contentLength := fi.Size()
 
-// 		checksums, err := p.retrieveChecksums(f, srcBucket, srcObject)
-// 		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 			return s3response.CopyObjectOutput{}, fmt.Errorf("get obj checksum: %w", err)
-// 		}
+		checksums, err := h.retrieveChecksums(f, srcBucket, srcObject)
+		if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+			return s3response.CopyObjectOutput{}, fmt.Errorf("get obj checksum: %w", err)
+		}
 
-// 		// If any checksum algorithm is provided, replace, otherwise
-// 		// use the existing one
-// 		if input.ChecksumAlgorithm != "" {
-// 			checksums.Algorithm = input.ChecksumAlgorithm
-// 		}
+		// If any checksum algorithm is provided, replace, otherwise
+		// use the existing one
+		if input.ChecksumAlgorithm != "" {
+			checksums.Algorithm = input.ChecksumAlgorithm
+		}
 
-// 		putObjectInput := s3response.PutObjectInput{
-// 			Bucket:                    &dstBucket,
-// 			Key:                       &dstObject,
-// 			Body:                      f,
-// 			ContentLength:             &contentLength,
-// 			ChecksumAlgorithm:         checksums.Algorithm,
-// 			ContentType:               input.ContentType,
-// 			ContentEncoding:           input.ContentEncoding,
-// 			ContentDisposition:        input.ContentDisposition,
-// 			ContentLanguage:           input.ContentLanguage,
-// 			CacheControl:              input.CacheControl,
-// 			Expires:                   input.Expires,
-// 			Metadata:                  input.Metadata,
-// 			ObjectLockRetainUntilDate: input.ObjectLockRetainUntilDate,
-// 			ObjectLockMode:            input.ObjectLockMode,
-// 			ObjectLockLegalHoldStatus: input.ObjectLockLegalHoldStatus,
-// 		}
+		putObjectInput := s3response.PutObjectInput{
+			Bucket:                    &dstBucket,
+			Key:                       &dstObject,
+			Body:                      f,
+			ContentLength:             &contentLength,
+			ChecksumAlgorithm:         checksums.Algorithm,
+			ContentType:               input.ContentType,
+			ContentEncoding:           input.ContentEncoding,
+			ContentDisposition:        input.ContentDisposition,
+			ContentLanguage:           input.ContentLanguage,
+			CacheControl:              input.CacheControl,
+			Expires:                   input.Expires,
+			Metadata:                  input.Metadata,
+			ObjectLockRetainUntilDate: input.ObjectLockRetainUntilDate,
+			ObjectLockMode:            input.ObjectLockMode,
+			ObjectLockLegalHoldStatus: input.ObjectLockLegalHoldStatus,
+		}
 
-// 		// load and pass the source object meta properties, if metadata directive is "COPY"
-// 		if input.MetadataDirective != types.MetadataDirectiveReplace {
-// 			metaProps := p.loadObjectMetaData(srcBucket, srcObject, &fi, nil)
-// 			putObjectInput.ContentEncoding = metaProps.ContentEncoding
-// 			putObjectInput.ContentDisposition = metaProps.ContentDisposition
-// 			putObjectInput.ContentLanguage = metaProps.ContentLanguage
-// 			putObjectInput.ContentType = metaProps.ContentType
-// 			putObjectInput.CacheControl = metaProps.CacheControl
-// 			putObjectInput.Expires = metaProps.Expires
-// 			putObjectInput.Metadata = mdmap
-// 		}
+		// load and pass the source object meta properties, if metadata directive is "COPY"
+		if input.MetadataDirective != types.MetadataDirectiveReplace {
+			metaProps := h.loadObjectMetaData(srcBucket, srcObject, &fi, nil)
+			putObjectInput.ContentEncoding = metaProps.ContentEncoding
+			putObjectInput.ContentDisposition = metaProps.ContentDisposition
+			putObjectInput.ContentLanguage = metaProps.ContentLanguage
+			putObjectInput.ContentType = metaProps.ContentType
+			putObjectInput.CacheControl = metaProps.CacheControl
+			putObjectInput.Expires = metaProps.Expires
+			putObjectInput.Metadata = mdmap
+		}
 
-// 		// pass the input tagging to PutObject, if tagging directive is "REPLACE"
-// 		if input.TaggingDirective == types.TaggingDirectiveReplace {
-// 			putObjectInput.Tagging = input.Tagging
-// 		}
+		// pass the input tagging to PutObject, if tagging directive is "REPLACE"
+		if input.TaggingDirective == types.TaggingDirectiveReplace {
+			putObjectInput.Tagging = input.Tagging
+		}
 
-// 		res, err := p.PutObject(ctx, putObjectInput)
-// 		if err != nil {
-// 			return s3response.CopyObjectOutput{}, err
-// 		}
+		res, err := h.PutObject(ctx, putObjectInput)
+		if err != nil {
+			return s3response.CopyObjectOutput{}, err
+		}
 
-// 		// copy the source object tagging after the destination object
-// 		// creation, if tagging directive is "COPY"
-// 		if input.TaggingDirective == types.TaggingDirectiveCopy {
-// 			tagging, err := p.meta.RetrieveAttribute(nil, srcBucket, srcObject, tagHdr)
-// 			if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
-// 				return s3response.CopyObjectOutput{}, fmt.Errorf("get source object tagging: %w", err)
-// 			}
-// 			if err == nil {
-// 				err := p.meta.StoreAttribute(nil, dstBucket, dstObject, tagHdr, tagging)
-// 				if err != nil {
-// 					return s3response.CopyObjectOutput{}, fmt.Errorf("set destination object tagging: %w", err)
-// 				}
-// 			}
-// 		}
+		// copy the source object tagging after the destination object
+		// creation, if tagging directive is "COPY"
+		if input.TaggingDirective == types.TaggingDirectiveCopy {
+			tagging, err := h.meta.RetrieveAttribute(nil, srcBucket, srcObject, tagHdr)
+			if err != nil && !errors.Is(err, meta.ErrNoSuchKey) {
+				return s3response.CopyObjectOutput{}, fmt.Errorf("get source object tagging: %w", err)
+			}
+			if err == nil {
+				err := h.meta.StoreAttribute(nil, dstBucket, dstObject, tagHdr, tagging)
+				if err != nil {
+					return s3response.CopyObjectOutput{}, fmt.Errorf("set destination object tagging: %w", err)
+				}
+			}
+		}
 
-// 		etag = res.ETag
-// 		version = &res.VersionID
-// 		crc32 = res.ChecksumCRC32
-// 		crc32c = res.ChecksumCRC32C
-// 		sha1 = res.ChecksumSHA1
-// 		sha256 = res.ChecksumSHA256
-// 		crc64nvme = res.ChecksumCRC64NVME
-// 		chType = res.ChecksumType
-// 	}
+		etag = res.ETag
+		version = &res.VersionID
+		crc32 = res.ChecksumCRC32
+		crc32c = res.ChecksumCRC32C
+		sha1 = res.ChecksumSHA1
+		sha256 = res.ChecksumSHA256
+		crc64nvme = res.ChecksumCRC64NVME
+		chType = res.ChecksumType
+	}
 
-// 	fi, err = os.Stat(dstObjdPath)
-// 	if err != nil {
-// 		return s3response.CopyObjectOutput{}, fmt.Errorf("stat dst object: %w", err)
-// 	}
+	fi, err = h.client.Stat(dstObjdPath)
+	if err != nil {
+		return s3response.CopyObjectOutput{}, fmt.Errorf("stat dst object: %w", err)
+	}
 
-// 	return s3response.CopyObjectOutput{
-// 		CopyObjectResult: &s3response.CopyObjectResult{
-// 			ETag:              &etag,
-// 			LastModified:      backend.GetTimePtr(fi.ModTime()),
-// 			ChecksumCRC32:     crc32,
-// 			ChecksumCRC32C:    crc32c,
-// 			ChecksumSHA1:      sha1,
-// 			ChecksumSHA256:    sha256,
-// 			ChecksumCRC64NVME: crc64nvme,
-// 			ChecksumType:      chType,
-// 		},
-// 		VersionId:           version,
-// 		CopySourceVersionId: &srcVersionId,
-// 	}, nil
-// }
+	return s3response.CopyObjectOutput{
+		CopyObjectResult: &s3response.CopyObjectResult{
+			ETag:              &etag,
+			LastModified:      backend.GetTimePtr(fi.ModTime()),
+			ChecksumCRC32:     crc32,
+			ChecksumCRC32C:    crc32c,
+			ChecksumSHA1:      sha1,
+			ChecksumSHA256:    sha256,
+			ChecksumCRC64NVME: crc64nvme,
+			ChecksumType:      chType,
+		},
+		VersionId:           version,
+		CopySourceVersionId: &srcVersionId,
+	}, nil
+}
 
 func (h *HDFS) ListObjects(ctx context.Context, input *s3.ListObjectsInput) (s3response.ListObjectsResult, error) {
 	if input.Bucket == nil {
@@ -4992,13 +4998,13 @@ func getString(str *string) string {
 	return *str
 }
 
-// func joinPathWithTrailer(paths ...string) string {
-// 	joined := filepath.Join(paths...)
-// 	if strings.HasSuffix(paths[len(paths)-1], "/") {
-// 		joined += "/"
-// 	}
-// 	return joined
-// }
+func joinPathWithTrailer(paths ...string) string {
+	joined := filepath.Join(paths...)
+	if strings.HasSuffix(paths[len(paths)-1], "/") {
+		joined += "/"
+	}
+	return joined
+}
 
 type tmpfile struct {
 	fw          *hdfs.FileWriter
