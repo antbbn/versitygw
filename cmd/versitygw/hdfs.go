@@ -25,7 +25,9 @@ import (
 )
 
 var (
-	nnaddress string
+	nnaddress  string
+	chownuser  string
+	chowngroup string
 )
 
 func hdfsCommand() *cli.Command {
@@ -50,17 +52,17 @@ will be translated into the file /mnt/fs/gwroot/mybucket/a/b/c/myobject`,
 				EnvVars:     []string{"VGW_HDFS_ADDRESS"},
 				Destination: &nnaddress,
 			},
-			&cli.BoolFlag{
-				Name:        "chuid",
-				Usage:       "chown newly created files and directories to client account UID",
+			&cli.StringFlag{
+				Name:        "chownuser",
+				Usage:       "chown newly created files and directories to user",
 				EnvVars:     []string{"VGW_CHOWN_UID"},
-				Destination: &chownuid,
+				Destination: &chownuser,
 			},
-			&cli.BoolFlag{
-				Name:        "chgid",
-				Usage:       "chown newly created files and directories to client account GID",
+			&cli.StringFlag{
+				Name:        "chowngroup",
+				Usage:       "chown newly created files and directories to group",
 				EnvVars:     []string{"VGW_CHOWN_GID"},
-				Destination: &chowngid,
+				Destination: &chowngroup,
 			},
 			// &cli.StringFlag{
 			// 	Name:        "versioning-dir",
@@ -113,8 +115,8 @@ func runHDFS(ctx *cli.Context) error {
 	}
 
 	opts := hdfs.HDFSOpts{
-		ChownUID: chownuid,
-		ChownGID: chowngid,
+		ChownUser:  chownuser,
+		ChownGroup: chowngroup,
 		// VersioningDir:  versioningDir,
 		NewDirPerm:     fs.FileMode(dirPerms),
 		ForceNoTmpFile: forceNoTmpFile,

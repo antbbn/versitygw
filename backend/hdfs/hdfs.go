@@ -57,15 +57,10 @@ type HDFS struct {
 
 	rootdir string
 
-	// chownuid/gid enable chowning of files to the account uid/gid
+	// chownuser/group enable chowning of files to the account user/group
 	// when objects are uploaded
-	chownuid bool
-	chowngid bool
-
-	// euid/egid are the effective uid/gid of the running versitygw process
-	// used to determine if chowning is needed
-	euid int
-	egid int
+	chownuser  string
+	chowngroup string
 
 	// bucket versioning directory path
 	//versioningDir string
@@ -115,9 +110,9 @@ const (
 // HDFSOpts are the options for the Posix backend
 type HDFSOpts struct {
 	// ChownUID sets the UID of the object to the UID of the user on PUT
-	ChownUID bool
+	ChownUser string
 	// ChownGID sets the GID of the object to the GID of the user on PUT
-	ChownGID bool
+	ChownGroup string
 	//VersioningDir sets the version directory to enable object versioning
 	//VersioningDir string
 	// NewDirPerm specifies the permission to set on newly created directories
@@ -165,13 +160,11 @@ func New(address string, rootdir string, ms meta.MetadataStorer, opts HDFSOpts) 
 		ms = meta.NewHdfsXattrMeta(client, rootdir)
 	}
 	return &HDFS{
-		meta:     ms,
-		client:   client,
-		rootdir:  rootdir,
-		euid:     os.Geteuid(), // TODO CHECK
-		egid:     os.Getegid(), // TODO CHECK
-		chownuid: opts.ChownUID,
-		chowngid: opts.ChownGID,
+		meta:       ms,
+		client:     client,
+		rootdir:    rootdir,
+		chownuser:  opts.ChownUser,
+		chowngroup: opts.ChownGroup,
 		//versioningDir:  verioningdirAbs,
 		newDirPerm:     opts.NewDirPerm,
 		forceNoTmpFile: opts.ForceNoTmpFile,
@@ -345,7 +338,7 @@ func (h *HDFS) CreateBucket(ctx context.Context, input *s3.CreateBucketInput, ac
 		acct = auth.Account{}
 	}
 
-	uid, gid, doChown := h.getChownIDs(acct)
+	uid, gid, doChown := h.getChownIDs()
 
 	bucket := *input.Bucket
 
@@ -1326,23 +1319,19 @@ func (h *HDFS) CreateMultipartUpload(ctx context.Context, mpu s3response.CreateM
 	}, nil
 }
 
-// getChownIDs returns the uid and gid that should be used for chowning
-// the object to the account uid/gid. It also returns a boolean indicating
+// getChownIDs returns the user and group that should be used for chowning
+// the object to the account user group. It also returns a boolean indicating
 // if chowning is needed.
-func (h *HDFS) getChownIDs(acct auth.Account) (string, string, bool) {
-	// uid := h.euid
-	// gid := h.egid
-	// var needsChown bool
-	// if h.chownuid && acct.UserID != h.euid {
-	// 	uid = acct.UserID
-	// 	needsChown = true
-	// }
-	// if h.chowngid && acct.GroupID != h.egid {
-	// 	gid = acct.GroupID
-	// 	needsChown = true
-	// }
+func (h *HDFS) getChownIDs() (string, string, bool) {
+	needsChown := false
+	if h.chownuser != "" && h.chownuser != h.client.User() {
+		needsChown = true
+	}
+	if h.chowngroup != "" {
+		needsChown = true
+	}
 
-	return "antbbn", "antbbn", false
+	return h.chownuser, h.chowngroup, needsChown
 }
 
 func getPartChecksum(algo types.ChecksumAlgorithm, part types.CompletedPart) string {
@@ -1361,12 +1350,6 @@ func getPartChecksum(algo types.ChecksumAlgorithm, part types.CompletedPart) str
 }
 
 func (h *HDFS) CompleteMultipartUpload(ctx context.Context, input *s3.CompleteMultipartUploadInput) (s3response.CompleteMultipartUploadResult, string, error) {
-	// TODO figure out permissions
-	// acct, ok := ctx.Value("account").(auth.Account)
-	// if !ok {
-	// 	acct = auth.Account{}
-	// }
-
 	var res s3response.CompleteMultipartUploadResult
 
 	if input.Bucket == nil {
@@ -1545,11 +1528,16 @@ func (h *HDFS) CompleteMultipartUpload(ctx context.Context, input *s3.CompleteMu
 	objname := filepath.Join(h.rootdir, bucket, object)
 	dir := filepath.Dir(objname)
 	if dir != "" {
-		// uid, gid, doChown := p.getChownIDs(acct)
-		// err = backend.MkdirAll(dir, uid, gid, doChown, p.newDirPerm)
+		user, group, doChown := h.getChownIDs()
 		err = h.client.MkdirAll(dir, h.newDirPerm)
 		if err != nil {
 			return res, "", err
+		}
+		if doChown {
+			err := h.ChownAll(dir, user, group)
+			if err != nil {
+				return res, "", err
+			}
 		}
 	}
 
@@ -2287,11 +2275,6 @@ type hashConfig struct {
 }
 
 func (h *HDFS) UploadPart(ctx context.Context, input *s3.UploadPartInput) (*s3.UploadPartOutput, error) {
-	// acct, ok := ctx.Value("account").(auth.Account)
-	// if !ok {
-	// 	acct = auth.Account{}
-	// }
-
 	if input.Bucket == nil {
 		return nil, s3err.GetAPIError(s3err.ErrInvalidBucketName)
 	}
@@ -2550,8 +2533,6 @@ func (h *HDFS) UploadPartCopy(ctx context.Context, upi *s3.UploadPartCopyInput) 
 		return s3response.CopyPartResult{}, err
 	}
 
-	// f, err := p.openTmpFile(filepath.Join(*upi.Bucket, objdir),
-	// 	*upi.Bucket, partPath, length, acct, doFalloc, p.forceNoTmpFile)
 	f, err := h.openTmpFile(*upi.Bucket, length)
 	if err != nil {
 		if errors.Is(err, syscall.EDQUOT) {
@@ -2678,12 +2659,6 @@ func (h *HDFS) UploadPartCopy(ctx context.Context, upi *s3.UploadPartCopyInput) 
 }
 
 func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3response.PutObjectOutput, error) {
-	// TODO fix perms
-	// acct, ok := ctx.Value("account").(auth.Account)
-	// if !ok {
-	// 	acct = auth.Account{}
-	// }
-
 	if po.Bucket == nil {
 		return s3response.PutObjectOutput{}, s3err.GetAPIError(s3err.ErrInvalidBucketName)
 	}
@@ -2709,7 +2684,7 @@ func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3r
 
 	name := filepath.Join(h.rootdir, *po.Bucket, *po.Key)
 
-	// uid, gid, doChown := h.getChownIDs(acct)
+	user, group, doChown := h.getChownIDs()
 
 	contentLength := int64(0)
 	if po.ContentLength != nil {
@@ -2724,14 +2699,18 @@ func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3r
 			return s3response.PutObjectOutput{}, s3err.GetAPIError(s3err.ErrDirectoryObjectContainsData)
 		}
 
-		// TODO deal with intermediate chowns
-		//err = backend.MkdirAll(name, uid, gid, doChown, p.newDirPerm)
 		err = h.client.MkdirAll(name, h.newDirPerm)
 		if err != nil {
 			if errors.Is(err, syscall.EDQUOT) {
 				return s3response.PutObjectOutput{}, s3err.GetAPIError(s3err.ErrQuotaExceeded)
 			}
 			return s3response.PutObjectOutput{}, err
+		}
+		if doChown {
+			err := h.ChownAll(name, user, group)
+			if err != nil {
+				return s3response.PutObjectOutput{}, err
+			}
 		}
 
 		for k, v := range po.Metadata {
@@ -2854,10 +2833,15 @@ func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3r
 
 	dir := filepath.Dir(name)
 	if dir != "" {
-		// TODO Figure out chown here
 		err = h.client.MkdirAll(dir, h.newDirPerm)
 		if err != nil {
 			return s3response.PutObjectOutput{}, s3err.GetAPIError(s3err.ErrExistingObjectIsDirectory)
+		}
+		if doChown {
+			err := h.ChownAll(dir, user, group)
+			if err != nil {
+				return s3response.PutObjectOutput{}, err
+			}
 		}
 	}
 
@@ -5008,28 +4992,30 @@ type tmpfile struct {
 	size        int64
 }
 
-// var (
-// 	// TODO: make this configurable
-// 	defaultFilePerm fs.FileMode = 0644
-// )
-
 func (h *HDFS) openTmpFile(bucket string, size int64) (*tmpfile, error) {
 	tmpDir := filepath.Join(h.rootdir, bucket, metaTmpDir)
 	// Create a temp file for upload while in progress (see link comments below).
 	var err error
-	// TODO deal with intermediate chowns
-	//	uid, gid, doChown := h.getChownIDs(acct)
-	//err = backend.MkdirAll(dir, uid, gid, doChown, p.newDirPerm)
-	err = h.client.MkdirAll(tmpDir, h.newDirPerm)
 
+	user, group, doChown := h.getChownIDs()
+	err = h.client.MkdirAll(tmpDir, h.newDirPerm)
 	if err != nil {
 		if errors.Is(err, syscall.EROFS) {
 			return nil, s3err.GetAPIError(s3err.ErrMethodNotAllowed)
 		}
 		return nil, fmt.Errorf("make temp dir: %w", err)
 	}
+	if doChown {
+		err = h.ChownAll(tmpDir, user, group)
+		if err != nil {
+			if errors.Is(err, syscall.EROFS) {
+				return nil, s3err.GetAPIError(s3err.ErrMethodNotAllowed)
+			}
+			return nil, fmt.Errorf("chown temp dir: %w", err)
+		}
+	}
+
 	// TODO fix replication and blocksize
-	// TODO fix perm
 	tmpFileName := filepath.Join(tmpDir, uuid.New().String())
 	// Create an empty file to allow xattrs to be written to it
 	err = h.client.CreateEmptyFile(tmpFileName)
@@ -5039,6 +5025,12 @@ func (h *HDFS) openTmpFile(bucket string, size int64) (*tmpfile, error) {
 		}
 		return nil, fmt.Errorf("create temp file: %w", err)
 	}
+	if doChown {
+		err := h.client.Chown(tmpFileName, user, group)
+		if err != nil {
+			return nil, fmt.Errorf("set temp file ownership: %w", err)
+		}
+	}
 	fw, err := h.client.Append(tmpFileName)
 	if err != nil {
 		if errors.Is(err, syscall.EROFS) {
@@ -5046,13 +5038,6 @@ func (h *HDFS) openTmpFile(bucket string, size int64) (*tmpfile, error) {
 		}
 		return nil, fmt.Errorf("create temp file: %w", err)
 	}
-
-	// if doChown {
-	// 	err := f.Chown(uid, gid)
-	// 	if err != nil {
-	// 		return nil, fmt.Errorf("set temp file ownership: %w", err)
-	// 	}
-	// }
 
 	return &tmpfile{fw: fw, tmpFileName: tmpFileName, size: size}, nil
 }
@@ -5083,4 +5068,15 @@ func (tmp *tmpfile) Write(b []byte) (int, error) {
 
 func (tmp *tmpfile) cleanup() {
 	tmp.fw.Close()
+}
+
+func (h *HDFS) ChownAll(path, user, group string) error {
+	if path == h.rootdir {
+		return nil
+	}
+	err := h.client.Chown(path, user, group)
+	if err != nil {
+		return err
+	}
+	return h.ChownAll(filepath.Dir(path), user, group)
 }
