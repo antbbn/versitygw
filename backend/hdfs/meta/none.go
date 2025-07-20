@@ -14,14 +14,74 @@
 
 package meta
 
+import (
+	"crypto/md5"
+	"encoding/hex"
+	"fmt"
+	"path/filepath"
+
+	"github.com/colinmarc/hdfs/v2"
+)
+
 // NoMeta is a metadata storer that does not store metadata.
 // This can be useful for read only mounts where attempting to store metadata
 // would fail.
-type NoMeta struct{}
+type NoMeta struct {
+	client  *hdfs.Client
+	rootdir string
+}
+
+func NewNoMeta(client *hdfs.Client, rootdir string) NoMeta {
+	return NoMeta{client: client, rootdir: rootdir}
+}
+
+const (
+	// onameAttr           = "objname"
+	// tagHdr              = "X-Amz-Tagging"
+	// metaHdr             = "X-Amz-Meta"
+	// contentTypeHdr      = "content-type"
+	// contentEncHdr       = "content-encoding"
+	// contentLangHdr      = "content-language"
+	// contentDispHdr      = "content-disposition"
+	// cacheCtrlHdr        = "cache-control"
+	// expiresHdr          = "expires"
+	emptyMD5 = "\"d41d8cd98f00b204e9800998ecf8427e\""
+	aclkey   = "acl"
+	// ownershipkey        = "ownership"
+	etagkey = "etag"
+	// checksumsKey        = "checksums"
+	// policykey           = "policy"
+	// bucketLockKey       = "bucket-lock"
+	// objectRetentionKey  = "object-retention"
+	// objectLegalHoldKey  = "object-legal-hold"
+	// versioningKey       = "versioning"
+	// deleteMarkerKey     = "delete-marker"
+	// versionIdKey        = "version-id"
+)
 
 // RetrieveAttribute retrieves the value of a specific attribute for an object or a bucket.
-// always returns ErrNoSuchKey
-func (NoMeta) RetrieveAttribute(_, _, _, _ string) ([]byte, error) {
+// returns ErrNoSuchKey for most attributes. etag attribute is always calcualated
+func (n NoMeta) RetrieveAttribute(fullpath, bucket, object, attribute string) ([]byte, error) {
+	if attribute == etagkey {
+		if fullpath == "" {
+			fullpath = filepath.Join(n.rootdir, bucket, object)
+		}
+
+		fi, err := n.client.Stat(fullpath)
+		if err != nil {
+			return nil, ErrNoSuchKey
+		}
+		if fi.IsDir() {
+			return nil, ErrNoSuchKey
+			//return []byte(emptyMD5), nil
+		}
+
+		sum := md5.Sum([]byte(fullpath))
+		return fmt.Appendf(nil, "\"%s\"", hex.EncodeToString(sum[:])), nil
+	}
+	if attribute == aclkey {
+		return []byte{}, nil
+	}
 	return nil, ErrNoSuchKey
 }
 
@@ -39,12 +99,20 @@ func (NoMeta) DeleteAttribute(_, _, _ string) error {
 
 // ListAttributes lists all attributes for an object or a bucket.
 // always returns an empty list of attributes
-func (NoMeta) ListAttributes(_, _ string) ([]string, error) {
-	return []string{}, nil
+func (NoMeta) ListAttributes(bucket, object string) ([]string, error) {
+	return []string{etagkey}, nil
 }
 
 // DeleteAttributes removes all attributes for an object or a bucket.
 // always returns nil without deleting any attributes
 func (NoMeta) DeleteAttributes(bucket, object string) error {
 	return nil
+}
+
+func (n NoMeta) GenerateEtag(fullpath, bucket, object string) string {
+	if fullpath == "" {
+		fullpath = filepath.Join(n.rootdir, bucket, object)
+	}
+	sum := md5.Sum([]byte(fullpath))
+	return fmt.Sprintf("\"%s\"", hex.EncodeToString(sum[:]))
 }

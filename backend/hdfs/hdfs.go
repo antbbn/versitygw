@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 
@@ -158,6 +159,12 @@ func New(address string, rootdir string, ms meta.MetadataStorer, opts HDFSOpts) 
 
 	if ms == nil {
 		ms = meta.NewHdfsXattrMeta(client, rootdir)
+	}
+	if _, ok := ms.(meta.NoMeta); ok {
+		ms = meta.NewNoMeta(client, rootdir)
+	}
+	if _, ok := ms.(meta.HybridMeta); ok {
+		ms = meta.NewHybridMeta(client, rootdir)
 	}
 	return &HDFS{
 		meta:       ms,
@@ -1519,7 +1526,6 @@ func (h *HDFS) CompleteMultipartUpload(ctx context.Context, input *s3.CompleteMu
 
 	userMetaData := make(map[string]string)
 	objMeta := h.loadObjectMetaData(bucket, upiddir, nil, userMetaData)
-	// TODO nil below because we are using the sidecar
 	err = h.storeObjectMetadata(f.tmpFileName, bucket, object, objMeta)
 	if err != nil {
 		return res, "", err
@@ -1655,7 +1661,6 @@ func (h *HDFS) CompleteMultipartUpload(ctx context.Context, input *s3.CompleteMu
 			checksum.CRC64NVME = &sum
 			crc64nvme = &sum
 		}
-		// TODO nil below because we are using the sidecar
 		err := h.storeChecksums(f.tmpFileName, bucket, object, checksum)
 		if err != nil {
 			return res, "", fmt.Errorf("store object checksum: %w", err)
@@ -2385,7 +2390,7 @@ func (h *HDFS) UploadPart(ctx context.Context, input *s3.UploadPartInput) (*s3.U
 		return nil, fmt.Errorf("write part data: %w", err)
 	}
 
-	etag := backend.GenerateEtag(hash)
+	etag := h.GenerateEtag(hash, "", bucket, partPath)
 	err = h.meta.StoreAttribute(f.tmpFileName, bucket, partPath, etagkey, []byte(etag))
 	if err != nil {
 		return nil, fmt.Errorf("set etag attr: %w", err)
@@ -2630,7 +2635,7 @@ func (h *HDFS) UploadPartCopy(ctx context.Context, upi *s3.UploadPartCopyInput) 
 		}
 	}
 
-	etag := backend.GenerateEtag(hash)
+	etag := h.GenerateEtag(hash, "", *upi.Bucket, partPath)
 	err = h.meta.StoreAttribute(f.tmpFileName, *upi.Bucket, partPath, etagkey, []byte(etag))
 	if err != nil {
 		return s3response.CopyPartResult{}, fmt.Errorf("set etag attr: %w", err)
@@ -2845,7 +2850,7 @@ func (h *HDFS) PutObject(ctx context.Context, po s3response.PutObjectInput) (s3r
 		}
 	}
 
-	etag := backend.GenerateEtag(hash)
+	etag := h.GenerateEtag(hash, name, "", "")
 
 	// if the versioning is enabled, generate a new versionID for the object
 	var versionID string
@@ -5079,4 +5084,11 @@ func (h *HDFS) ChownAll(path, user, group string) error {
 		return err
 	}
 	return h.ChownAll(filepath.Dir(path), user, group)
+}
+
+func (h *HDFS) GenerateEtag(g hash.Hash, fullpath, bucket, obj string) string {
+	if m, ok := h.meta.(meta.NoMeta); ok {
+		return m.GenerateEtag(fullpath, bucket, obj)
+	}
+	return backend.GenerateEtag(g)
 }

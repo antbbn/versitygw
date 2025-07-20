@@ -28,6 +28,7 @@ var (
 	nnaddress  string
 	chownuser  string
 	chowngroup string
+	hybrid     bool
 )
 
 func hdfsCommand() *cli.Command {
@@ -91,6 +92,12 @@ will be translated into the file /mnt/fs/gwroot/mybucket/a/b/c/myobject`,
 				Destination: &nometa,
 			},
 			&cli.BoolFlag{
+				Name:        "hybridmeta",
+				Usage:       "use hybrid metadata storage (will check xattrs first and if missing use nometa)",
+				EnvVars:     []string{"VGW_META_HYBRID"},
+				Destination: &hybrid,
+			},
+			&cli.BoolFlag{
 				Name:        "disableotmp",
 				Usage:       "disable O_TMPFILE support for new objects",
 				EnvVars:     []string{"VGW_DISABLE_OTMP"},
@@ -132,7 +139,9 @@ func runHDFS(ctx *cli.Context) error {
 		ms = sc
 		opts.SideCarDir = sidecar
 	case nometa:
-		ms = meta.NoMeta{}
+		ms = meta.NewNoMeta(nil, "") // will be inited later
+	case hybrid:
+		ms = meta.NewHybridMeta(nil, "") // will be inited later
 	}
 
 	be, err := hdfs.New(nnaddress, gwroot, ms, opts)
